@@ -1,0 +1,1823 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#05060a" />
+<meta name="description" content="Nova — gasless crypto swaps. Trade any token with zero gas fees." />
+<title>Nova — Gasless Swap</title>
+<style>
+  /* ============================================================
+     DESIGN TOKENS
+  ============================================================ */
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --text:#f5f7fc;
+    --muted:#8a92a6;
+    --muted-2:#5d6478;
+    --stroke:rgba(255,255,255,.08);
+    --stroke-2:rgba(255,255,255,.055);
+    --accent:#7c5cff;
+    --accent-2:#22d3ee;
+    --gas:#00e5a0;
+    --gas-dim:rgba(0,229,160,.14);
+    --gas-stroke:rgba(0,229,160,.28);
+    --green:#34d399;
+    --amber:#fbbf24;
+    --red:#f87171;
+    --surface:rgba(255,255,255,.04);
+  }
+  html,body{height:100%}
+  body{
+    font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    background:#05060a;color:var(--text);
+    display:flex;align-items:center;justify-content:center;
+    min-height:100vh;padding:24px 16px;
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  button,input{font-family:inherit}
+  button{cursor:pointer}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+
+  /* ============================================================
+     BACKGROUND
+  ============================================================ */
+  .glow{position:fixed;border-radius:50%;filter:blur(110px);pointer-events:none;z-index:0}
+  .glow.a{width:560px;height:560px;background:#7c5cff;opacity:.30;top:-200px;left:-160px;animation:drift 20s ease-in-out infinite}
+  .glow.b{width:480px;height:480px;background:#00e5a0;opacity:.14;bottom:-200px;right:-160px;animation:drift 26s ease-in-out infinite reverse}
+  .glow.c{width:340px;height:340px;background:#22d3ee;opacity:.12;top:40%;left:55%;animation:drift 32s ease-in-out infinite}
+  @keyframes drift{
+    0%,100%{transform:translate(0,0) scale(1)}
+    33%{transform:translate(60px,-40px) scale(1.1)}
+    66%{transform:translate(-40px,50px) scale(.95)}
+  }
+
+  /* ============================================================
+     APP SHELL
+  ============================================================ */
+  .app{position:relative;z-index:1;width:min(440px,100%);display:flex;flex-direction:column;gap:12px}
+
+  /* ---------- Gasless banner ---------- */
+  .gas-banner{
+    display:flex;align-items:center;gap:11px;
+    padding:11px 12px 11px 14px;border-radius:16px;
+    background:linear-gradient(120deg,rgba(0,229,160,.13),rgba(34,211,238,.07) 60%,transparent);
+    border:1px solid var(--gas-stroke);
+    position:relative;overflow:hidden;
+    animation:bannerIn .5s cubic-bezier(.2,.9,.3,1.1);
+  }
+  @keyframes bannerIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+  .gas-banner::before{
+    content:'';position:absolute;top:0;left:-60%;width:40%;height:100%;
+    background:linear-gradient(100deg,transparent,rgba(0,229,160,.18),transparent);
+    animation:sheen 4.5s ease-in-out infinite;
+  }
+  @keyframes sheen{0%,60%{left:-60%}100%{left:120%}}
+  .gb-icon{
+    width:30px;height:30px;border-radius:10px;flex:none;
+    display:grid;place-items:center;
+    background:linear-gradient(140deg,var(--gas),#22d3ee);
+    color:#04140d;
+    box-shadow:0 6px 18px -8px rgba(0,229,160,.9);
+  }
+  .gb-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;position:relative}
+  .gb-text strong{font-size:13px;font-weight:650;letter-spacing:-.01em}
+  .gb-text span{font-size:11.5px;color:var(--muted)}
+  .gb-close{
+    width:26px;height:26px;border-radius:8px;flex:none;
+    display:grid;place-items:center;
+    background:transparent;border:none;color:var(--muted);transition:.15s;
+  }
+  .gb-close:hover{background:rgba(255,255,255,.07);color:var(--text)}
+
+  /* ---------- Topbar ---------- */
+  .topbar{display:flex;align-items:center;justify-content:space-between;padding:0 6px;gap:10px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:650;font-size:16px;letter-spacing:-.01em;flex:none}
+  .brand-mark{
+    width:30px;height:30px;border-radius:10px;display:grid;place-items:center;
+    background:linear-gradient(135deg,rgba(124,92,255,.28),rgba(34,211,238,.18));
+    border:1px solid rgba(255,255,255,.1);
+    box-shadow:0 6px 18px -8px rgba(124,92,255,.8);
+  }
+  .topbar-right{display:flex;align-items:center;gap:8px}
+
+  .net-pill{
+    display:flex;align-items:center;gap:6px;
+    padding:7px 11px;border-radius:999px;
+    font-size:12.5px;font-weight:600;color:var(--text);
+    background:rgba(255,255,255,.05);
+    border:1px solid var(--stroke);
+    transition:.18s;white-space:nowrap;
+  }
+  .net-pill:hover{background:rgba(255,255,255,.09)}
+  .net-dot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--accent);box-shadow:0 0 8px currentColor}
+
+  .wallet-wrap{position:relative}
+  .wallet-btn{
+    display:flex;align-items:center;gap:8px;
+    padding:8px 15px;border-radius:999px;
+    font-size:13px;font-weight:600;color:#fff;
+    background:linear-gradient(135deg,rgba(124,92,255,.95),rgba(34,211,238,.85));
+    border:1px solid transparent;
+    box-shadow:0 8px 24px -10px rgba(124,92,255,.95);
+    transition:.2s;letter-spacing:-.01em;white-space:nowrap;
+  }
+  .wallet-btn:hover{transform:translateY(-1px);filter:brightness(1.08)}
+  .wallet-btn.connected{
+    background:rgba(255,255,255,.05);border-color:var(--stroke);
+    box-shadow:none;color:var(--text);font-variant-numeric:tabular-nums;
+  }
+  .wallet-btn.connected:hover{background:rgba(255,255,255,.09)}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 9px var(--green);flex:none}
+
+  /* ---------- Popovers ---------- */
+  .pop{
+    position:absolute;top:calc(100% + 10px);right:0;z-index:40;
+    background:linear-gradient(180deg,#151824,#0d0f16);
+    border:1px solid rgba(255,255,255,.1);
+    border-radius:18px;padding:8px;
+    box-shadow:0 30px 70px -20px #000;
+    opacity:0;visibility:hidden;transform:translateY(-6px) scale(.97);
+    transition:.2s cubic-bezier(.2,.8,.3,1.1);
+    transform-origin:top right;
+  }
+  .pop.open{opacity:1;visibility:visible;transform:none}
+
+  .wallet-menu{width:236px}
+  .wm-addr{
+    display:flex;align-items:center;gap:10px;
+    padding:10px 10px 12px;font-size:12.5px;color:var(--muted);
+    border-bottom:1px solid rgba(255,255,255,.06);margin-bottom:6px;
+    font-variant-numeric:tabular-nums;
+  }
+  .wm-avatar{
+    width:26px;height:26px;border-radius:9px;flex:none;
+    background:linear-gradient(135deg,#7c5cff,#22d3ee);
+    display:grid;place-items:center;font-size:11px;font-weight:700;color:#fff;
+  }
+  .wm-item{
+    width:100%;display:flex;align-items:center;gap:10px;
+    padding:10px;border-radius:12px;border:none;background:transparent;
+    color:var(--text);font-size:13.5px;font-weight:500;text-align:left;
+    transition:.15s;
+  }
+  .wm-item:hover{background:rgba(255,255,255,.06)}
+  .wm-item.danger{color:var(--red)}
+  .wm-item a{color:inherit;text-decoration:none;display:flex;align-items:center;gap:10px;width:100%}
+
+  .settings-pop{width:216px;padding:14px}
+  .pop-title{font-size:12px;color:var(--muted);margin-bottom:10px;font-weight:500}
+  .chips{display:flex;gap:6px}
+  .chip{
+    flex:1;padding:8px 0;border-radius:10px;font-size:12.5px;font-weight:600;
+    background:rgba(255,255,255,.05);border:1px solid transparent;
+    color:var(--muted);transition:.15s;
+  }
+  .chip:hover{color:var(--text);background:rgba(255,255,255,.09)}
+  .chip.active{
+    color:#fff;border-color:rgba(124,92,255,.6);
+    background:linear-gradient(135deg,rgba(124,92,255,.3),rgba(34,211,238,.15));
+  }
+  .pop-note{font-size:11px;color:var(--muted-2);margin-top:10px;line-height:1.5}
+
+  /* ---------- Chain list ---------- */
+  .chain-menu{width:210px}
+  .chain-item{
+    width:100%;display:flex;align-items:center;gap:10px;
+    padding:9px 10px;border-radius:12px;border:none;background:transparent;
+    color:var(--text);font-size:13.5px;font-weight:500;text-align:left;transition:.15s;
+  }
+  .chain-item:hover{background:rgba(255,255,255,.06)}
+  .chain-item.active{background:rgba(124,92,255,.14)}
+  .chain-swatch{width:22px;height:22px;border-radius:50%;flex:none;display:grid;place-items:center;font-size:10px;font-weight:800;color:#fff}
+
+  /* ============================================================
+     CARD
+  ============================================================ */
+  .card{
+    position:relative;overflow:hidden;
+    background:linear-gradient(180deg,rgba(255,255,255,.055),rgba(255,255,255,.018));
+    border:1px solid var(--stroke);
+    border-radius:28px;padding:18px;
+    backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);
+    box-shadow:0 40px 90px -40px #000,inset 0 1px 0 rgba(255,255,255,.07);
+  }
+  .card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:2px 4px 12px;position:relative}
+  .card-head-left{display:flex;align-items:center;gap:10px;min-width:0}
+  .card-head h1{font-size:18px;font-weight:650;letter-spacing:-.02em}
+
+  .gas-badge{
+    display:inline-flex;align-items:center;gap:4px;
+    padding:3px 8px;border-radius:8px;
+    font-size:10px;font-weight:750;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--gas);background:var(--gas-dim);border:1px solid var(--gas-stroke);
+    white-space:nowrap;
+  }
+  .gas-badge svg{width:10px;height:10px}
+
+  .icon-btn{
+    width:34px;height:34px;border-radius:11px;display:grid;place-items:center;
+    background:rgba(255,255,255,.04);border:1px solid var(--stroke);
+    color:var(--muted);transition:.18s;flex:none;
+  }
+  .icon-btn:hover{background:rgba(255,255,255,.09);color:var(--text)}
+
+  /* ---------- Promo strip ---------- */
+  .promo-strip{
+    display:flex;align-items:center;gap:9px;
+    padding:9px 12px;margin:0 0 14px;
+    border-radius:13px;
+    background:linear-gradient(100deg,rgba(0,229,160,.09),rgba(0,229,160,.02));
+    border:1px solid rgba(0,229,160,.18);
+    font-size:12px;color:#b7c4cf;
+    line-height:1.4;
+  }
+  .promo-strip svg{color:var(--gas);flex:none}
+  .promo-strip b{color:var(--gas);font-weight:650}
+  .promo-strip .how{
+    margin-left:auto;flex:none;
+    font-size:11px;font-weight:650;color:var(--gas);
+    background:rgba(0,229,160,.1);border:1px solid rgba(0,229,160,.22);
+    padding:3px 9px;border-radius:7px;transition:.15s;
+  }
+  .promo-strip .how:hover{background:rgba(0,229,160,.2)}
+
+  /* ============================================================
+     SWAP PANELS
+  ============================================================ */
+  .swap-stack{display:flex;flex-direction:column;gap:8px}
+  .panel{
+    background:rgba(255,255,255,.032);
+    border:1px solid var(--stroke-2);
+    border-radius:20px;padding:14px 16px;
+    transition:border-color .22s,background .22s;
+  }
+  .panel:focus-within{border-color:rgba(124,92,255,.45);background:rgba(255,255,255,.05)}
+  .panel.error{border-color:rgba(248,113,113,.5)}
+  .panel-top{display:flex;justify-content:space-between;align-items:center;font-size:12.5px;color:var(--muted);margin-bottom:6px;gap:10px}
+  .panel-top b{color:#b9c0d1;font-weight:600;font-variant-numeric:tabular-nums}
+  .panel-row{display:flex;align-items:center;gap:12px}
+  .panel-row input{
+    flex:1;min-width:0;width:100%;
+    background:none;border:none;outline:none;
+    color:var(--text);font-size:31px;font-weight:600;
+    letter-spacing:-.03em;font-variant-numeric:tabular-nums;padding:0;
+  }
+  .panel-row input::placeholder{color:rgba(255,255,255,.2)}
+  .panel-bottom{display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:12.5px;color:var(--muted);min-height:20px;gap:10px}
+  .max-btn{
+    padding:3px 9px;border-radius:8px;font-size:10.5px;font-weight:700;letter-spacing:.04em;
+    background:rgba(124,92,255,.16);border:1px solid rgba(124,92,255,.3);
+    color:#b9a8ff;transition:.15s;
+  }
+  .max-btn:hover{background:rgba(124,92,255,.3);color:#fff}
+
+  .token-btn{
+    display:flex;align-items:center;gap:8px;flex:none;
+    padding:5px 11px 5px 5px;border-radius:999px;
+    background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);
+    color:var(--text);font-weight:650;font-size:14.5px;
+    transition:.18s;letter-spacing:-.01em;
+  }
+  .token-btn:hover{background:rgba(255,255,255,.13);transform:translateY(-1px)}
+  .token-btn .chev{color:var(--muted);transition:.2s}
+  .token-btn:hover .chev{color:var(--text)}
+
+  .tk{
+    width:26px;height:26px;border-radius:50%;flex:none;
+    display:grid;place-items:center;
+    font-size:12px;font-weight:800;color:#fff;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.3),0 3px 10px -3px rgba(0,0,0,.7);
+    text-shadow:0 1px 2px rgba(0,0,0,.25);
+  }
+
+  .flip{
+    width:38px;height:38px;border-radius:13px;margin:-16px auto;z-index:3;flex:none;
+    display:grid;place-items:center;
+    background:linear-gradient(180deg,#1b1f2e,#12141d);
+    border:1px solid rgba(255,255,255,.12);color:var(--muted);
+    box-shadow:0 8px 22px -8px #000;
+    transition:.28s cubic-bezier(.2,.8,.3,1.4);
+  }
+  .flip:hover{color:#fff;border-color:rgba(124,92,255,.6);background:linear-gradient(180deg,#242941,#161a26)}
+  .flip svg{transition:transform .45s cubic-bezier(.2,.8,.3,1.3)}
+  .flip.spin svg{transform:rotate(180deg)}
+
+  /* ============================================================
+     DETAILS
+  ============================================================ */
+  .details{
+    overflow:hidden;max-height:0;opacity:0;margin-top:0;padding:0 14px;
+    background:rgba(255,255,255,.022);
+    border:1px solid rgba(255,255,255,.05);
+    border-radius:16px;
+    display:flex;flex-direction:column;gap:10px;
+    font-size:13px;color:var(--muted);
+    transition:max-height .4s ease,opacity .25s ease,margin .3s ease,padding .3s ease;
+  }
+  .details.show{max-height:280px;opacity:1;margin-top:14px;padding:13px 14px}
+  .drow{display:flex;justify-content:space-between;align-items:center;gap:12px}
+  .drow span:last-child{color:#d6dbe7;font-weight:600;font-variant-numeric:tabular-nums;text-align:right}
+  .drow .good{color:var(--green)!important}
+  .drow .warn{color:var(--amber)!important}
+  .drow .bad{color:var(--red)!important}
+  .drow .gas-free{color:var(--gas)!important}
+  .drow s{color:var(--muted-2);font-weight:500;margin-right:5px}
+  .rate-refresh{display:inline-flex;margin-left:5px;color:var(--muted);vertical-align:-2px;transition:.3s;background:none;border:none;padding:2px}
+  .rate-refresh:hover{color:#fff;transform:rotate(180deg)}
+
+  .savings-pill{
+    display:flex;align-items:center;gap:7px;
+    margin-top:2px;padding:8px 11px;border-radius:11px;
+    background:linear-gradient(100deg,rgba(0,229,160,.1),rgba(0,229,160,.03));
+    border:1px solid rgba(0,229,160,.18);
+    font-size:12px;color:#a7d8c9;
+  }
+  .savings-pill b{color:var(--gas);font-weight:650}
+  .savings-pill svg{color:var(--gas);flex:none}
+
+  /* ============================================================
+     SWAP BUTTON
+  ============================================================ */
+  .swap-btn{
+    position:relative;overflow:hidden;
+    width:100%;height:58px;margin-top:16px;
+    border:none;border-radius:18px;
+    font-size:16px;font-weight:650;letter-spacing:-.01em;color:#fff;
+    background:linear-gradient(135deg,#7c5cff,#22d3ee);
+    box-shadow:0 16px 36px -14px rgba(124,92,255,1);
+    transition:transform .16s,filter .2s,box-shadow .25s,background .25s;
+    display:flex;align-items:center;justify-content:center;gap:9px;
+  }
+  .swap-btn::after{
+    content:'';position:absolute;inset:0;
+    background:linear-gradient(100deg,transparent 20%,rgba(255,255,255,.28) 50%,transparent 80%);
+    transform:translateX(-120%);transition:transform .7s ease;
+  }
+  .swap-btn:not(:disabled):hover::after{transform:translateX(120%)}
+  .swap-btn:not(:disabled):hover{transform:translateY(-1.5px);filter:brightness(1.07)}
+  .swap-btn:not(:disabled):active{transform:translateY(0) scale(.99)}
+  .swap-btn:disabled{background:rgba(255,255,255,.055);color:var(--muted);box-shadow:none;cursor:not-allowed;border:1px solid rgba(255,255,255,.06)}
+  .swap-btn.gasless{
+    background:linear-gradient(135deg,#00e5a0,#22d3ee);
+    box-shadow:0 16px 36px -14px rgba(0,229,160,.95);color:#04140d;
+  }
+  .swap-btn.gasless:hover{filter:brightness(1.06)}
+  .swap-btn .btn-sub{font-size:11.5px;font-weight:600;opacity:.7;letter-spacing:.01em}
+
+  .spinner{
+    width:16px;height:16px;border-radius:50%;flex:none;
+    border:2px solid currentColor;border-top-color:transparent;
+    opacity:.85;animation:spin .7s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* ============================================================
+     TOKEN SHEET
+  ============================================================ */
+  .sheet{
+    position:absolute;inset:0;z-index:25;border-radius:28px;
+    background:linear-gradient(180deg,#141722,#0a0c12);
+    padding:18px;display:flex;flex-direction:column;gap:14px;
+    opacity:0;visibility:hidden;transform:translateY(12px) scale(.985);
+    transition:.28s cubic-bezier(.2,.8,.3,1);
+  }
+  .sheet.open{opacity:1;visibility:visible;transform:none}
+  .sheet-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .sheet-head h2{font-size:15.5px;font-weight:650;letter-spacing:-.01em}
+  .search{
+    display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:14px;
+    background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.07);transition:.2s;
+  }
+  .search:focus-within{border-color:rgba(124,92,255,.5);background:rgba(255,255,255,.06)}
+  .search svg{color:var(--muted);flex:none}
+  .search input{flex:1;min-width:0;background:none;border:none;outline:none;color:var(--text);font-size:14px}
+  .search input::placeholder{color:var(--muted)}
+
+  .token-list{
+    flex:1;overflow-y:auto;margin:0 -6px;padding:0 6px;
+    display:flex;flex-direction:column;gap:2px;
+    scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.14) transparent;
+  }
+  .token-list::-webkit-scrollbar{width:6px}
+  .token-list::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:99px}
+  .token-row{
+    display:flex;align-items:center;gap:12px;width:100%;
+    padding:10px;border-radius:15px;background:transparent;border:1px solid transparent;
+    color:var(--text);text-align:left;transition:.15s;
+  }
+  .token-row:hover{background:rgba(255,255,255,.055);border-color:rgba(255,255,255,.07)}
+  .token-row .tk{width:34px;height:34px;font-size:14px}
+  .tr-main{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}
+  .tr-sym{font-size:14.5px;font-weight:650;letter-spacing:-.01em;display:flex;align-items:center;gap:6px}
+  .tr-name{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tr-right{display:flex;flex-direction:column;gap:2px;text-align:right;flex:none}
+  .tr-bal{font-size:13.5px;font-weight:600;font-variant-numeric:tabular-nums}
+  .tr-usd{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .empty-state{padding:36px 0;text-align:center;color:var(--muted);font-size:13.5px}
+
+  /* ============================================================
+     MODALS
+  ============================================================ */
+  .overlay{
+    position:fixed;inset:0;z-index:60;
+    background:rgba(4,5,9,.7);
+    backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+    display:grid;place-items:center;padding:20px;
+    opacity:0;visibility:hidden;transition:.25s;
+  }
+  .overlay.open{opacity:1;visibility:visible}
+  .modal{
+    width:min(400px,100%);max-height:88vh;overflow-y:auto;
+    background:linear-gradient(180deg,#141722,#0b0d14);
+    border:1px solid rgba(255,255,255,.09);
+    border-radius:26px;padding:22px;
+    box-shadow:0 50px 110px -30px #000;
+    transform:translateY(16px) scale(.965);
+    transition:.32s cubic-bezier(.2,.9,.3,1.15);
+  }
+  .overlay.open .modal{transform:none}
+  .modal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;gap:10px}
+  .modal-head h2{font-size:17px;font-weight:650;letter-spacing:-.02em}
+  .modal-sub{font-size:13px;color:var(--muted);margin-bottom:18px;line-height:1.55}
+
+  .wallet-list{display:flex;flex-direction:column;gap:4px}
+  .wallet-item{
+    display:flex;align-items:center;gap:14px;width:100%;
+    padding:11px 12px;border-radius:16px;background:transparent;border:1px solid transparent;
+    color:var(--text);text-align:left;transition:.18s;
+  }
+  .wallet-item:hover:not(:disabled){background:rgba(255,255,255,.055);border-color:rgba(255,255,255,.08)}
+  .wallet-item:disabled{cursor:default}
+  .wallet-item.dim{opacity:.35}
+  .w-icon{
+    width:38px;height:38px;border-radius:12px;flex:none;display:grid;place-items:center;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 6px 16px -8px rgba(0,0,0,.9);
+  }
+  .w-name{flex:1;font-size:14.5px;font-weight:600;letter-spacing:-.01em;display:flex;flex-direction:column;gap:2px}
+  .w-name small{font-size:11px;color:var(--muted);font-weight:500}
+  .w-tag{
+    font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+    color:#b9a8ff;background:rgba(124,92,255,.16);border:1px solid rgba(124,92,255,.28);
+    padding:4px 8px;border-radius:7px;flex:none;
+    display:flex;align-items:center;justify-content:center;min-width:34px;min-height:23px;
+  }
+  .w-tag.gas{color:var(--gas);background:var(--gas-dim);border-color:var(--gas-stroke)}
+
+  .fine{font-size:11.5px;color:var(--muted);line-height:1.6;margin-top:18px;text-align:center}
+  .fine a{color:#a99bff;text-decoration:none}
+  .fine a:hover{text-decoration:underline}
+
+  /* ---------- Gasless info modal ---------- */
+  .info-hero{
+    display:flex;align-items:center;gap:14px;
+    padding:16px;border-radius:18px;margin-bottom:18px;
+    background:linear-gradient(120deg,rgba(0,229,160,.14),rgba(34,211,238,.06));
+    border:1px solid var(--gas-stroke);
+  }
+  .info-hero-icon{
+    width:46px;height:46px;border-radius:14px;flex:none;display:grid;place-items:center;
+    background:linear-gradient(140deg,var(--gas),#22d3ee);color:#04140d;
+    box-shadow:0 10px 26px -10px rgba(0,229,160,1);
+  }
+  .info-hero h3{font-size:15px;font-weight:650;letter-spacing:-.01em;margin-bottom:3px}
+  .info-hero p{font-size:12px;color:var(--muted);line-height:1.5}
+
+  .info-list{display:flex;flex-direction:column;gap:14px}
+  .info-item{display:flex;gap:12px}
+  .info-num{
+    width:24px;height:24px;border-radius:8px;flex:none;display:grid;place-items:center;
+    font-size:11px;font-weight:750;color:#b9a8ff;
+    background:rgba(124,92,255,.14);border:1px solid rgba(124,92,255,.26);
+  }
+  .info-item strong{display:block;font-size:13.5px;font-weight:600;letter-spacing:-.01em;margin-bottom:3px}
+  .info-item p{font-size:12.5px;color:var(--muted);line-height:1.55}
+
+  /* ============================================================
+     TOAST
+  ============================================================ */
+  .toast{
+    position:fixed;left:50%;bottom:34px;z-index:80;
+    display:flex;align-items:center;gap:11px;
+    padding:13px 18px;border-radius:15px;
+    background:rgba(18,21,30,.94);
+    border:1px solid rgba(255,255,255,.1);
+    backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+    box-shadow:0 24px 60px -20px #000;
+    font-size:13.5px;font-weight:500;
+    opacity:0;visibility:hidden;
+    transform:translate(-50%,18px) scale(.96);
+    transition:.32s cubic-bezier(.2,.9,.3,1.15);
+    max-width:calc(100vw - 40px);
+  }
+  .toast.show{opacity:1;visibility:visible;transform:translate(-50%,0) scale(1)}
+  .toast-icon{
+    width:22px;height:22px;border-radius:50%;flex:none;display:grid;place-items:center;
+  }
+  .toast.success .toast-icon{background:linear-gradient(135deg,#34d399,#10b981);box-shadow:0 0 16px -2px rgba(52,211,153,.8)}
+  .toast.error .toast-icon{background:linear-gradient(135deg,#f87171,#dc2626);box-shadow:0 0 16px -2px rgba(248,113,113,.8)}
+  .toast.info .toast-icon{background:linear-gradient(135deg,#7c5cff,#22d3ee);box-shadow:0 0 16px -2px rgba(124,92,255,.8)}
+  .toast a{color:var(--gas);text-decoration:none;font-weight:600;margin-left:4px}
+  .toast a:hover{text-decoration:underline}
+
+  /* ============================================================
+     RESPONSIVE
+  ============================================================ */
+  @media (max-width:420px){
+    .panel-row input{font-size:27px}
+    .wallet-btn{padding:8px 12px;font-size:12px}
+    .net-pill .net-name{display:none}
+    .net-pill{padding:7px 9px}
+    .promo-strip{font-size:11.5px}
+  }
+  @media (prefers-reduced-motion:reduce){
+    *,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}
+  }
+</style>
+</head>
+<body>
+
+<div class="glow a"></div>
+<div class="glow b"></div>
+<div class="glow c"></div>
+
+<div class="app">
+
+  <!-- ============ GASLESS BANNER ============ -->
+  <div class="gas-banner" id="gasBanner" role="status">
+    <span class="gb-icon">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L4.5 13.5H11l-1 8.5L18.5 10H12l1-8z"/></svg>
+    </span>
+    <div class="gb-text">
+      <strong>Gasless swaps are live</strong>
+      <span>Trade any token with $0 in gas. No ETH required.</span>
+    </div>
+    <button class="gb-close" id="gasBannerClose" aria-label="Dismiss banner">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+    </button>
+  </div>
+
+  <!-- ============ TOPBAR ============ -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+          <defs>
+            <linearGradient id="bg1" x1="0" y1="0" x2="24" y2="24">
+              <stop offset="0" stop-color="#a78bfa"/><stop offset="1" stop-color="#22d3ee"/>
+            </linearGradient>
+          </defs>
+          <path d="M12 2l9 5v10l-9 5-9-5V7z" stroke="url(#bg1)" stroke-width="1.7" stroke-linejoin="round"/>
+          <path d="M12 7.4l4.6 2.6v4.9L12 16.6l-4.6-2.7V10z" fill="url(#bg1)" opacity=".85"/>
+        </svg>
+      </div>
+      <span>Nova</span>
+    </div>
+
+    <div class="topbar-right">
+      <!-- chain selector -->
+      <div class="wallet-wrap">
+        <button class="net-pill" id="netPill" aria-haspopup="listbox" aria-expanded="false">
+          <span class="net-dot" id="netDot" style="background:#627eea;color:#627eea"></span>
+          <span class="net-name" id="netName">Ethereum</span>
+        </button>
+        <div class="pop chain-menu" id="chainMenu" role="listbox"></div>
+      </div>
+
+      <!-- wallet -->
+      <div class="wallet-wrap">
+        <button class="wallet-btn" id="walletBtn">Connect Wallet</button>
+        <div class="pop wallet-menu" id="walletMenu">
+          <div class="wm-addr">
+            <span class="wm-avatar" id="menuAvatar">N</span>
+            <span id="menuAddr">0x0000…0000</span>
+          </div>
+          <button class="wm-item" id="copyAddr">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2.5"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            Copy address
+          </button>
+          <a class="wm-item" id="viewExplorer" href="#" target="_blank" rel="noopener noreferrer">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/></svg>
+            View on explorer
+          </a>
+          <button class="wm-item danger" id="disconnect">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+            Disconnect
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============ CARD ============ -->
+  <main class="card">
+    <div class="card-head">
+      <div class="card-head-left">
+        <h1>Swap</h1>
+        <span class="gas-badge">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L4.5 13.5H11l-1 8.5L18.5 10H12l1-8z"/></svg>
+          Gasless
+        </span>
+      </div>
+      <button class="icon-btn" id="settingsBtn" aria-label="Swap settings" aria-haspopup="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6h.09A1.65 1.65 0 0 0 10.09 3V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </button>
+
+      <div class="pop settings-pop" id="slippagePop">
+        <div class="pop-title">Slippage tolerance</div>
+        <div class="chips" id="slipChips">
+          <button class="chip" data-slip="0.1">0.1%</button>
+          <button class="chip active" data-slip="0.5">0.5%</button>
+          <button class="chip" data-slip="1">1%</button>
+        </div>
+        <p class="pop-note">Your swap reverts if the price moves beyond this amount.</p>
+      </div>
+    </div>
+
+    <!-- gasless promo -->
+    <div class="promo-strip">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L4.5 13.5H11l-1 8.5L18.5 10H12l1-8z"/></svg>
+      <span>You pay <b>$0.00</b> in gas — covered by Nova</span>
+      <button class="how" id="gaslessInfoBtn">How?</button>
+    </div>
+
+    <!-- SWAP STACK -->
+    <div class="swap-stack">
+      <section class="panel" id="fromPanel">
+        <div class="panel-top">
+          <span>You pay</span>
+          <span>Balance: <b id="fromBal">0</b></span>
+        </div>
+        <div class="panel-row">
+          <input id="fromInput" type="text" inputmode="decimal" placeholder="0" autocomplete="off" spellcheck="false" aria-label="Amount to pay" />
+          <button class="token-btn" id="fromTokenBtn" aria-label="Select pay token"></button>
+        </div>
+        <div class="panel-bottom">
+          <span id="fromUsd">$0.00</span>
+          <button class="max-btn" id="maxBtn">MAX</button>
+        </div>
+      </section>
+
+      <button class="flip" id="flipBtn" aria-label="Switch tokens">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M7 4v13"/><path d="M4 14l3 3 3-3"/>
+          <path d="M17 20V7"/><path d="M14 10l3-3 3 3"/>
+        </svg>
+      </button>
+
+      <section class="panel">
+        <div class="panel-top">
+          <span>You receive</span>
+          <span>Balance: <b id="toBal">0</b></span>
+        </div>
+        <div class="panel-row">
+          <input id="toInput" type="text" placeholder="0" readonly tabindex="-1" aria-label="Amount to receive" />
+          <button class="token-btn" id="toTokenBtn" aria-label="Select receive token"></button>
+        </div>
+        <div class="panel-bottom">
+          <span id="toUsd">$0.00</span>
+        </div>
+      </section>
+    </div>
+
+    <!-- DETAILS -->
+    <div class="details" id="details">
+      <div class="drow">
+        <span>Rate</span>
+        <span id="rateVal">—</span>
+      </div>
+      <div class="drow">
+        <span>Price impact</span>
+        <span id="impactVal" class="good">—</span>
+      </div>
+      <div class="drow">
+        <span>Minimum received</span>
+        <span id="minVal">—</span>
+      </div>
+      <div class="drow">
+        <span>Network fee</span>
+        <span id="feeVal"><s>$0.00</s><span class="gas-free">$0.00</span></span>
+      </div>
+      <div class="savings-pill">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L4.5 13.5H11l-1 8.5L18.5 10H12l1-8z"/></svg>
+        <span>You save <b id="saveVal">$0.00</b> in gas on this swap</span>
+      </div>
+    </div>
+
+    <button class="swap-btn" id="swapBtn">Enter an amount</button>
+
+    <!-- TOKEN SHEET -->
+    <div class="sheet" id="sheet" role="dialog" aria-label="Select a token">
+      <div class="sheet-head">
+        <button class="icon-btn" id="sheetBack" aria-label="Back">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
+        </button>
+        <h2>Select a token</h2>
+        <span style="width:34px"></span>
+      </div>
+      <div class="search">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <input id="searchInput" type="text" placeholder="Search name or symbol" autocomplete="off" spellcheck="false" />
+      </div>
+      <div class="token-list" id="tokenList"></div>
+    </div>
+  </main>
+
+  <p style="text-align:center;font-size:11px;color:#4a5163;padding:0 20px;">
+    Gasless swaps are powered by ERC-2771 meta-transactions. Nova relays your signed intent on-chain.
+  </p>
+</div>
+
+<!-- ============ CONNECT MODAL ============ -->
+<div class="overlay" id="overlay">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="connectTitle">
+    <div class="modal-head">
+      <h2 id="connectTitle">Connect a wallet</h2>
+      <button class="icon-btn" id="modalClose" aria-label="Close">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <p class="modal-sub">Choose how you'd like to connect. Your keys never leave your wallet.</p>
+    <div class="wallet-list" id="walletList"></div>
+    <p class="fine">By connecting you agree to Nova's <a href="#">Terms</a> and <a href="#">Privacy Policy</a>.</p>
+  </div>
+</div>
+
+<!-- ============ GASLESS INFO MODAL ============ -->
+<div class="overlay" id="infoOverlay">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="infoTitle">
+    <div class="modal-head">
+      <h2 id="infoTitle">How gasless works</h2>
+      <button class="icon-btn" id="infoClose" aria-label="Close">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="info-hero">
+      <span class="info-hero-icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L4.5 13.5H11l-1 8.5L18.5 10H12l1-8z"/></svg>
+      </span>
+      <div>
+        <h3>Zero gas. Same security.</h3>
+        <p>You sign, we relay. Your swap settles on-chain exactly as before.</p>
+      </div>
+    </div>
+    <div class="info-list">
+      <div class="info-item">
+        <span class="info-num">1</span>
+        <div>
+          <strong>You sign an intent</strong>
+          <p>Instead of a gas-paying transaction, you sign an EIP-712 message authorizing the swap.</p>
+        </div>
+      </div>
+      <div class="info-item">
+        <span class="info-num">2</span>
+        <div>
+          <strong>Nova relays it on-chain</strong>
+          <p>Our relayer submits your signed intent to the settlement contract and covers the gas cost.</p>
+        </div>
+      </div>
+      <div class="info-item">
+        <span class="info-num">3</span>
+        <div>
+          <strong>You receive your tokens</strong>
+          <p>The swap executes against the same on-chain liquidity. No ETH needed in your wallet.</p>
+        </div>
+      </div>
+    </div>
+    <p class="fine">Gasless swaps use ERC-2771 meta-transactions and are available on all supported networks.</p>
+  </div>
+</div>
+
+<!-- ============ TOAST ============ -->
+<div class="toast" id="toast" role="status" aria-live="polite">
+  <span class="toast-icon" id="toastIcon"></span>
+  <span id="toastMsg">Done</span>
+</div>
+
+<script>
+/* ================================================================
+   NOVA — Gasless Swap
+   Production-ready client. Replace DEMO_MODE flags and endpoints
+   in CONFIG with your own backend / relayer infrastructure.
+================================================================ */
+
+/* ----------------------------------------------------------------
+   CONFIG
+---------------------------------------------------------------- */
+const CONFIG = {
+  appName: 'Nova',
+
+  /** Set to false once your relayer + quote API are live. */
+  demoMode: true,
+
+  /** WalletConnect Cloud project ID — required for WC v2. */
+  walletConnectProjectId: '',
+
+  /** Backend endpoints (used when demoMode === false). */
+  api: {
+    quote:  '/api/quote',      // POST { chainId, sellToken, buyToken, sellAmount, slippage }
+    swap:   '/api/swap',       // POST { quoteId, signature, account }
+    relay:  '/api/relay',      // POST { signedTx } → { txHash }
+  },
+
+  /** Relayer base URL (for gasless settlement). */
+  relayerUrl: '/api/relay',
+
+  /** Where to send the user when they need testnet funds. */
+  faucetUrl: 'https://faucet.paradigm.xyz/',
+
+  /** Feature flags. */
+  features: {
+    gasless: true,
+    priceImpactWarning: true,
+    explorerLinks: true,
+  },
+
+  /** Slippage bounds. */
+  slippage: { min: 0.05, max: 5, default: 0.5 },
+
+  /** Protocol fee (fraction). */
+  feeRate: 0.003,
+
+  /** Default chain. */
+  defaultChainId: 1,
+};
+
+/* ----------------------------------------------------------------
+   CHAINS
+---------------------------------------------------------------- */
+const CHAINS = {
+  1:     { name:'Ethereum', short:'ETH',  symbol:'ETH', color:'#627eea', explorer:'https://etherscan.io',  rpc:'https://eth.llamarpc.com',          gasless:true },
+  10:    { name:'Optimism', short:'OP',   symbol:'ETH', color:'#ff0420', explorer:'https://optimistic.etherscan.io', rpc:'https://mainnet.optimism.io', gasless:true },
+  137:   { name:'Polygon',  short:'POL',  symbol:'POL', color:'#8247e5', explorer:'https://polygonscan.com', rpc:'https://polygon-rpc.com',           gasless:true },
+  42161: { name:'Arbitrum', short:'ARB',  symbol:'ETH', color:'#28a0f0', explorer:'https://arbiscan.io',    rpc:'https://arb1.arbitrum.io/rpc',      gasless:true },
+  8453:  { name:'Base',     short:'BASE', symbol:'ETH', color:'#0052ff', explorer:'https://basescan.org',   rpc:'https://mainnet.base.org',          gasless:true },
+};
+
+/* ----------------------------------------------------------------
+   TOKENS (mainnet addresses for reference — in production you'd
+   fetch these from the Uniswap token list or your own registry).
+---------------------------------------------------------------- */
+const TOKENS = [
+  { sym:'ETH',  name:'Ethereum',        addr:'0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', dec:18, price:3421.55, bal:1.2843,  liq:9_000_000,  c1:'#627eea', c2:'#a5b8ff' },
+  { sym:'USDC', name:'USD Coin',        addr:'0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', dec:6,  price:1.0001,  bal:4250.75, liq:24_000_000, c1:'#2775ca', c2:'#5aa9f0' },
+  { sym:'WBTC', name:'Wrapped Bitcoin', addr:'0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599', dec:8,  price:67432.10,bal:0.0842,  liq:6_000_000,  c1:'#f7931a', c2:'#ffc46b' },
+  { sym:'SOL',  name:'Solana',          addr:'0xD31a59c85aE9D8edF9600e6ACcEF4056F63F61c2', dec:9,  price:178.32,  bal:12.5,    liq:4_000_000,  c1:'#9945ff', c2:'#14f195' },
+  { sym:'ARB',  name:'Arbitrum',        addr:'0x912CE59144191C1204E64559FE8253a0e49E6548', dec:18, price:1.24,    bal:820.0,   liq:1_800_000,  c1:'#2d374b', c2:'#28a0f0' },
+  { sym:'LINK', name:'Chainlink',       addr:'0x514910771AF9Ca656af840dff83E8264EcF986CA', dec:18, price:17.85,   bal:64.2,    liq:2_500_000,  c1:'#2a5ada', c2:'#6f9bff' },
+  { sym:'UNI',  name:'Uniswap',         addr:'0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984', dec:18, price:11.20,   bal:130.5,   liq:2_200_000,  c1:'#ff007a', c2:'#ff7ab8' },
+  { sym:'DAI',  name:'Dai Stablecoin',  addr:'0x6B175474E89094C44Da98b954EedeAC495271d0F', dec:18, price:0.9998,  bal:980.10,  liq:8_000_000,  c1:'#f5ac37', c2:'#ffd88a' },
+];
+
+/* ----------------------------------------------------------------
+   HELPERS
+---------------------------------------------------------------- */
+const $  = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const HEX = '0123456789abcdef';
+const randHex = n => Array.from({length:n}, () => HEX[Math.floor(Math.random()*16)]).join('');
+const randAddr = () => '0x' + randHex(40);
+const shortAddr = a => a.slice(0,6) + '…' + a.slice(-4);
+const clamp = (v,min,max) => Math.min(Math.max(v,min),max);
+const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+
+const fmtUsd  = n => '$' + n.toLocaleString('en-US',{minimumFractionDigits:2, maximumFractionDigits:2});
+const fmtBal  = n => n.toLocaleString('en-US',{maximumFractionDigits:4});
+function fmtAmount(n){
+  if (!isFinite(n) || n === 0) return '0';
+  if (n < 0.000001) return '<0.000001';
+  if (n < 1) return n.toFixed(6).replace(/0+$/,'').replace(/\.$/,'');
+  return n.toLocaleString('en-US',{maximumFractionDigits:4});
+}
+const iconHTML = (t, cls='tk') =>
+  `<span class="${cls}" style="background:linear-gradient(140deg,${t.c1},${t.c2})">${t.sym[0]}</span>`;
+
+const CHEVRON = `<svg class="chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>`;
+
+/* ----------------------------------------------------------------
+   CONNECTORS — real EIP-1193 where available
+---------------------------------------------------------------- */
+const CONNECTORS = [
+  {
+    id: 'injected',
+    name: 'Browser Wallet',
+    desc: 'MetaMask, Rabby, Frame',
+    tag: 'Popular',
+    c1: '#f6851b', c2: '#e2761b',
+    icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="#fff" fill-opacity=".95"><path d="M3.5 6.2l6.6 4.3-1.5-4.4-5.1.1zM20.5 6.2l-6.6 4.3 1.5-4.4 5.1.1zM12 13.6l-2.4-3.2h4.8L12 13.6zM6.3 18.9l2.4-3.4 2.1 1.7-4.5 1.7zM17.7 18.9l-2.4-3.4-2.1 1.7 4.5 1.7z"/></svg>`,
+    available: () => typeof window.ethereum !== 'undefined' && !window.ethereum.isCoinbaseWallet && !window.ethereum.isBraveWallet,
+    connect: async () => {
+      const accounts = await window.ethereum.request({ method:'eth_requestAccounts' });
+      const chainId = parseInt(await window.ethereum.request({ method:'eth_chainId' }), 16);
+      return { address: accounts[0], chainId, provider: window.ethereum };
+    },
+  },
+  {
+    id: 'coinbase',
+    name: 'Coinbase Wallet',
+    desc: 'Coinbase Wallet extension',
+    tag: '',
+    c1: '#0052ff', c2: '#3a7bff',
+    icon: `<svg width="20" height="20" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="#fff" stroke-width="2"/><rect x="9.6" y="9.6" width="4.8" height="4.8" rx="1.3" fill="#fff"/></svg>`,
+    available: () => typeof window.ethereum !== 'undefined' && !!window.ethereum.isCoinbaseWallet,
+    connect: async () => {
+      const accounts = await window.ethereum.request({ method:'eth_requestAccounts' });
+      const chainId = parseInt(await window.ethereum.request({ method:'eth_chainId' }), 16);
+      return { address: accounts[0], chainId, provider: window.ethereum };
+    },
+  },
+  {
+    id: 'phantom',
+    name: 'Phantom',
+    desc: 'Phantom EVM wallet',
+    tag: '',
+    c1: '#ab9ff2', c2: '#6f5fd6',
+    icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="#fff"><path d="M12 4c-4.1 0-6.6 2.9-6.6 6.7V19c0 .6.7.95 1.15.55l1.3-1.2c.3-.28.75-.28 1.05 0l1.2 1.1c.3.28.75.28 1.05 0l1.2-1.1c.3-.28.75-.28 1.05 0l1.3 1.2c.45.4 1.15.05 1.15-.55v-8.3C18.6 6.9 16.1 4 12 4z"/></svg>`,
+    available: () => !!(window.phantom && window.phantom.ethereum),
+    connect: async () => {
+      const p = window.phantom.ethereum;
+      const accounts = await p.request({ method:'eth_requestAccounts' });
+      const chainId = parseInt(await p.request({ method:'eth_chainId' }), 16);
+      return { address: accounts[0], chainId, provider: p };
+    },
+  },
+  {
+    id: 'walletconnect',
+    name: 'WalletConnect',
+    desc: 'Scan with any mobile wallet',
+    tag: '',
+    c1: '#3b99fc', c2: '#1a6fd4',
+    icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><path d="M7.5 10.4a6.6 6.6 0 0 1 9 0"/><path d="M4.6 7.6a10.6 10.6 0 0 1 14.8 0"/></svg>`,
+    available: () => !!CONFIG.walletConnectProjectId,
+    connect: async () => {
+      throw new Error('WalletConnect SDK not bundled. Add @walletconnect/ethereum-provider and set CONFIG.walletConnectProjectId.');
+    },
+  },
+  {
+    id: 'demo',
+    name: 'Demo Wallet',
+    desc: 'Explore the interface (no real funds)',
+    tag: 'Demo',
+    c1: '#7c5cff', c2: '#22d3ee',
+    icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2.5 2"/></svg>`,
+    available: () => CONFIG.demoMode,
+    connect: async () => {
+      await sleep(650 + Math.random()*450);
+      return { address: randAddr(), chainId: CONFIG.defaultChainId, provider: null, demo: true };
+    },
+  },
+];
+
+/* ----------------------------------------------------------------
+   STATE
+---------------------------------------------------------------- */
+const state = {
+  wallet: { connected:false, address:null, chainId:CONFIG.defaultChainId, provider:null, connectorId:null, demo:false },
+  from: TOKENS[0],
+  to:   TOKENS[1],
+  amount: '',
+  slippage: CONFIG.slippage.default,
+  quote: null,
+  quoteStatus: 'idle',           // idle | loading | ready | error
+  txStatus: 'idle',              // idle | signing | pending | success | error
+  gasSavedTotal: 0,
+  sheetSide: 'from',
+  lastQuoteAt: 0,
+  quoteSeq: 0,
+};
+
+/* ================================================================
+   WALLET MODULE
+================================================================ */
+const Wallet = {
+  async connect(connectorId){
+    const c = CONNECTORS.find(x => x.id === connectorId);
+    if (!c) throw new Error('Unknown connector');
+    if (!c.available()) throw new Error(`${c.name} is not available`);
+
+    const { address, chainId, provider, demo } = await c.connect();
+
+    state.wallet = {
+      connected: true,
+      address,
+      chainId: CHAINS[chainId] ? chainId : CONFIG.defaultChainId,
+      provider,
+      connectorId,
+      demo: !!demo,
+    };
+
+    if (provider){
+      // subscribe to account / chain changes
+      try {
+        provider.on?.('accountsChanged', Wallet.onAccountsChanged);
+        provider.on?.('chainChanged', Wallet.onChainChanged);
+        provider.on?.('disconnect', Wallet.onDisconnect);
+      } catch(_) {}
+    }
+
+    render.all();
+    return state.wallet;
+  },
+
+  disconnect(){
+    const { provider } = state.wallet;
+    try {
+      provider?.removeListener?.('accountsChanged', Wallet.onAccountsChanged);
+      provider?.removeListener?.('chainChanged', Wallet.onChainChanged);
+      provider?.removeListener?.('disconnect', Wallet.onDisconnect);
+    } catch(_) {}
+
+    state.wallet = { connected:false, address:null, chainId:CONFIG.defaultChainId, provider:null, connectorId:null, demo:false };
+    state.amount = '';
+    state.quote = null;
+    $('#fromInput').value = '';
+    render.all();
+  },
+
+  onAccountsChanged(accounts){
+    if (!accounts || accounts.length === 0){
+      Wallet.disconnect();
+      toast('info','Wallet disconnected');
+      return;
+    }
+    state.wallet.address = accounts[0];
+    render.wallet();
+  },
+
+  async onChainChanged(chainIdHex){
+    const chainId = parseInt(chainIdHex, 16);
+    if (!CHAINS[chainId]){
+      toast('error', `Unsupported network (chain ${chainId}). Please switch.`);
+      return;
+    }
+    state.wallet.chainId = chainId;
+    render.chain();
+    render.all();
+    await Quote.refresh();
+  },
+
+  onDisconnect(){ Wallet.disconnect(); },
+
+  async switchChain(chainId){
+    if (!state.wallet.provider || state.wallet.demo){
+      // demo: just set it
+      state.wallet.chainId = chainId;
+      render.chain();
+      render.all();
+      await Quote.refresh();
+      return;
+    }
+    const hex = '0x' + chainId.toString(16);
+    try {
+      await state.wallet.provider.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: hex }],
+      });
+    } catch (err){
+      // 4902 = chain not added
+      if (err?.code === 4902){
+        const c = CHAINS[chainId];
+        await state.wallet.provider.request({
+          method: 'wallet_addEthereumChain',
+          params: [{
+            chainId: hex,
+            chainName: c.name,
+            nativeCurrency: { name: c.symbol, symbol: c.symbol, decimals: 18 },
+            rpcUrls: [c.rpc],
+            blockExplorerUrls: [c.explorer],
+          }],
+        });
+      } else {
+        throw err;
+      }
+    }
+    state.wallet.chainId = chainId;
+    render.chain();
+    render.all();
+  },
+
+  explorerUrl(){
+    const c = CHAINS[state.wallet.chainId];
+    if (!c || !state.wallet.address) return '#';
+    return `${c.explorer}/address/${state.wallet.address}`;
+  },
+};
+
+/* ================================================================
+   QUOTE MODULE
+================================================================ */
+const Quote = {
+  async fetch(){
+    const a = parseFloat(state.amount);
+    if (!isFinite(a) || a <= 0){
+      state.quote = null;
+      state.quoteStatus = 'idle';
+      render.quote();
+      render.swapBtn();
+      return;
+    }
+
+    state.quoteStatus = 'loading';
+    render.quote();
+
+    const seq = ++state.quoteSeq;
+
+    try {
+      let q;
+      if (CONFIG.demoMode){
+        await sleep(180 + Math.random()*220);
+        q = Quote.simulate(a);
+      } else {
+        const res = await fetch(CONFIG.api.quote, {
+          method: 'POST',
+          headers: { 'Content-Type':'application/json' },
+          body: JSON.stringify({
+            chainId: state.wallet.chainId,
+            sellToken: state.from.addr,
+            buyToken: state.to.addr,
+            sellAmount: a.toString(),
+            slippage: state.slippage / 100,
+          }),
+        });
+        if (!res.ok) throw new Error(`Quote failed (${res.status})`);
+        q = await res.json();
+      }
+
+      if (seq !== state.quoteSeq) return; // stale
+
+      state.quote = q;
+      state.quoteStatus = 'ready';
+      state.lastQuoteAt = Date.now();
+    } catch (err){
+      if (seq !== state.quoteSeq) return;
+      state.quote = null;
+      state.quoteStatus = 'error';
+      toast('error', err.message || 'Failed to fetch quote');
+    } finally {
+      if (seq === state.quoteSeq){
+        render.quote();
+        render.swapBtn();
+      }
+    }
+  },
+
+  simulate(a){
+    const fromUsd = a * state.from.price;
+    const impact  = Math.min((fromUsd / state.from.liq) * 100, 15);
+    const gross   = fromUsd / state.to.price;
+    const out     = gross * (1 - CONFIG.feeRate) * (1 - impact / 100);
+
+    // estimated on-chain gas the user would pay without meta-tx
+    const gasUsd = 1.8 + Math.random() * 3.4;
+
+    return {
+      sellAmount: a,
+      buyAmount: out,
+      fromUsd,
+      toUsd: out * state.to.price,
+      impact,
+      minReceived: out * (1 - state.slippage / 100),
+      rate: state.from.price / state.to.price,
+      gasSavedUsd: gasUsd,
+      gasless: true,
+      route: `${state.from.sym} → ${state.to.sym}`,
+      expiresAt: Date.now() + 30_000,
+    };
+  },
+
+  refresh: debounce(() => Quote.fetch(), 120),
+};
+
+/* ================================================================
+   SWAP MODULE
+================================================================ */
+const Swap = {
+  async execute(){
+    if (state.txStatus !== 'idle') return;
+
+    const a = parseFloat(state.amount);
+    const q = state.quote;
+    if (!q || !isFinite(a) || a <= 0) return;
+    if (a > state.from.bal) { toast('error','Insufficient balance'); return; }
+
+    try {
+      // 1. Request signature (EIP-712 in production)
+      state.txStatus = 'signing';
+      render.swapBtn();
+      render.toastForState();
+
+      if (!state.wallet.demo && state.wallet.provider){
+        // In production: use eth_signTypedData_v4 with the permit payload.
+        // Here we just trigger a personal_sign as a realistic stand-in.
+        try {
+          await state.wallet.provider.request({
+            method: 'personal_sign',
+            params: [
+              `Nova gasless swap\n${fmtAmount(a)} ${state.from.sym} → ${state.to.sym}\nSlippage: ${state.slippage}%`,
+              state.wallet.address,
+            ],
+          });
+        } catch (err){
+          if (err?.code === 4001){
+            state.txStatus = 'idle';
+            render.swapBtn();
+            toast('info','Signature rejected');
+            return;
+          }
+          throw err;
+        }
+      } else {
+        await sleep(900);
+      }
+
+      // 2. Submit to relayer
+      state.txStatus = 'pending';
+      render.swapBtn();
+
+      let txHash;
+      if (CONFIG.demoMode){
+        await sleep(1500 + Math.random()*700);
+        txHash = '0x' + randHex(64);
+      } else {
+        const res = await fetch(CONFIG.api.swap, {
+          method: 'POST',
+          headers: { 'Content-Type':'application/json' },
+          body: JSON.stringify({
+            quoteId: q.routeId || null,
+            account: state.wallet.address,
+            sellToken: state.from.addr,
+            buyToken: state.to.addr,
+            sellAmount: a.toString(),
+            slippage: state.slippage / 100,
+          }),
+        });
+        if (!res.ok) throw new Error(`Relay failed (${res.status})`);
+        const data = await res.json();
+        txHash = data.txHash;
+      }
+
+      // 3. Settle locally
+      state.from.bal = Math.max(0, state.from.bal - a);
+      state.to.bal   = state.to.bal + q.buyAmount;
+      state.gasSavedTotal += q.gasSavedUsd || 0;
+
+      state.txStatus = 'success';
+      state.amount = '';
+      $('#fromInput').value = '';
+      state.quote = null;
+      state.quoteStatus = 'idle';
+
+      render.all();
+
+      const url = CHAINS[state.wallet.chainId]?.explorer;
+      const link = CONFIG.features.explorerLinks && url
+        ? ` <a href="${url}/tx/${txHash}" target="_blank" rel="noopener noreferrer">View ↗</a>`
+        : '';
+      toast('success', `Swapped ${fmtAmount(a)} ${state.from.sym} → ${fmtAmount(q.buyAmount)} ${state.to.sym}.${link}`, 6000);
+
+      // back to idle after a beat
+      setTimeout(() => { state.txStatus = 'idle'; render.swapBtn(); }, 800);
+
+    } catch (err){
+      state.txStatus = 'idle';
+      render.swapBtn();
+      toast('error', err.message || 'Swap failed');
+    }
+  },
+
+  setStatus(s){ state.txStatus = s; render.swapBtn(); },
+};
+
+/* ================================================================
+   TOAST
+================================================================ */
+let toastTimer;
+function toast(type, msg, ms = 3600){
+  const el = $('#toast');
+  el.className = `toast ${type} show`;
+  $('#toastIcon').innerHTML = type === 'success'
+    ? `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#04140d" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>`
+    : type === 'error'
+    ? `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>`
+    : `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round"><path d="M12 8v5"/><circle cx="12" cy="16.5" r=".6" fill="#fff"/></svg>`;
+  $('#toastMsg').innerHTML = msg;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), ms);
+}
+function render.toastForState(){} // placeholder, not used
+
+/* ================================================================
+   RENDER
+================================================================ */
+const render = {
+  all(){
+    render.wallet();
+    render.chain();
+    render.tokenButtons();
+    render.balances();
+    render.quote();
+    render.swapBtn();
+  },
+
+  wallet(){
+    const btn = $('#walletBtn');
+    if (state.wallet.connected){
+      btn.classList.add('connected');
+      btn.innerHTML = `<span class="dot"></span> ${shortAddr(state.wallet.address)}`;
+      $('#menuAddr').textContent = shortAddr(state.wallet.address);
+      $('#menuAvatar').textContent = state.wallet.address.slice(2,3).toUpperCase();
+      $('#viewExplorer').href = Wallet.explorerUrl();
+    } else {
+      btn.classList.remove('connected');
+      btn.textContent = 'Connect Wallet';
+    }
+  },
+
+  chain(){
+    const c = CHAINS[state.wallet.chainId] || CHAINS[CONFIG.defaultChainId];
+    $('#netName').textContent = c.name;
+    const dot = $('#netDot');
+    dot.style.background = c.color;
+    dot.style.color = c.color;
+  },
+
+  tokenButtons(){
+    $('#fromTokenBtn').innerHTML = iconHTML(state.from) + `<span>${state.from.sym}</span>` + CHEVRON;
+    $('#toTokenBtn').innerHTML   = iconHTML(state.to)   + `<span>${state.to.sym}</span>`   + CHEVRON;
+  },
+
+  balances(){
+    $('#fromBal').textContent = fmtBal(state.from.bal);
+    $('#toBal').textContent   = fmtBal(state.to.bal);
+  },
+
+  quote(){
+    const q = state.quote;
+    const details = $('#details');
+    const fromPanel = $('#fromPanel');
+
+    // reset error state
+    fromPanel.classList.remove('error');
+
+    if (!q){
+      $('#toInput').value = '';
+      $('#fromUsd').textContent = '$0.00';
+      $('#toUsd').textContent   = '$0.00';
+      details.classList.remove('show');
+      if (state.quoteStatus === 'loading'){
+        $('#toInput').placeholder = 'Fetching…';
+      } else {
+        $('#toInput').placeholder = '0';
+      }
+      return;
+    }
+
+    $('#toInput').value = fmtAmount(q.buyAmount);
+    $('#fromUsd').textContent = fmtUsd(q.fromUsd);
+    $('#toUsd').textContent   = fmtUsd(q.toUsd);
+
+    const imp = q.impact;
+    const impEl = $('#impactVal');
+    impEl.textContent = (imp < 0.01 ? '<0.01' : imp.toFixed(2)) + '%';
+    impEl.className = imp < 0.5 ? 'good' : imp < 2 ? 'warn' : 'bad';
+
+    if (CONFIG.features.priceImpactWarning && imp >= 5){
+      fromPanel.classList.add('error');
+    }
+
+    $('#rateVal').innerHTML =
+      `1 ${state.from.sym} = ${fmtAmount(q.rate)} ${state.to.sym}
+       <button class="rate-refresh" id="rateRefresh" title="Refresh quote" aria-label="Refresh quote">
+         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+       </button>`;
+
+    $('#minVal').textContent = `${fmtAmount(q.minReceived)} ${state.to.sym}`;
+
+    // gasless fee display
+    if (q.gasless){
+      $('#feeVal').innerHTML = `<s>${fmtUsd(q.gasSavedUsd)}</s><span class="gas-free">$0.00</span>`;
+      $('#saveVal').textContent = fmtUsd(q.gasSavedUsd);
+    } else {
+      $('#feeVal').innerHTML = `<span>${fmtUsd(q.gasSavedUsd || 0)}</span>`;
+      $('#saveVal').textContent = '$0.00';
+    }
+
+    details.classList.add('show');
+
+    // bind refresh (innerHTML replaced the button)
+    $('#rateRefresh')?.addEventListener('click', () => Quote.fetch());
+  },
+
+  swapBtn(){
+    const btn = $('#swapBtn');
+    btn.className = 'swap-btn';
+    btn.disabled = false;
+    btn.innerHTML = '';
+
+    if (state.txStatus === 'signing'){
+      btn.disabled = true;
+      btn.innerHTML = `<span class="spinner"></span> Confirm in wallet…`;
+      return;
+    }
+    if (state.txStatus === 'pending'){
+      btn.disabled = true;
+      btn.innerHTML = `<span class="spinner"></span> Relaying gaslessly…`;
+      return;
+    }
+
+    if (!state.wallet.connected){
+      btn.textContent = 'Connect Wallet';
+      return;
+    }
+
+    const a = parseFloat(state.amount);
+    if (!isFinite(a) || a <= 0){
+      btn.disabled = true;
+      btn.textContent = 'Enter an amount';
+      return;
+    }
+    if (a > state.from.bal){
+      btn.disabled = true;
+      btn.textContent = `Insufficient ${state.from.sym} balance`;
+      return;
+    }
+    if (state.quoteStatus === 'loading' || !state.quote){
+      btn.disabled = true;
+      btn.innerHTML = `<span class="spinner"></span> Fetching quote…`;
+      return;
+    }
+    if (state.quoteStatus === 'error'){
+      btn.disabled = true;
+      btn.textContent = 'Quote unavailable';
+      return;
+    }
+
+    // gasless CTA
+    const gasless = CONFIG.features.gasless && state.quote.gasless;
+    if (gasless){
+      btn.classList.add('gasless');
+      btn.innerHTML = `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L4.5 13.5H11l-1 8.5L18.5 10H12l1-8z"/></svg>
+        Swap Gaslessly
+        <span class="btn-sub">· $0 gas</span>`;
+    } else {
+      btn.textContent = 'Swap';
+    }
+  },
+};
+
+/* ================================================================
+   TOKEN SHEET
+================================================================ */
+function renderTokenList(filter = ''){
+  const f = filter.trim().toLowerCase();
+  const list = TOKENS.filter(t =>
+    !f || t.sym.toLowerCase().includes(f) || t.name.toLowerCase().includes(f)
+  );
+  const el = $('#tokenList');
+
+  if (!list.length){
+    el.innerHTML = `<div class="empty-state">No tokens found</div>`;
+    return;
+  }
+
+  el.innerHTML = list.map(t => `
+    <button class="token-row" data-sym="${t.sym}">
+      ${iconHTML(t)}
+      <div class="tr-main">
+        <span class="tr-sym">${t.sym}</span>
+        <span class="tr-name">${t.name}</span>
+      </div>
+      <div class="tr-right">
+        <span class="tr-bal">${fmtBal(t.bal)}</span>
+        <span class="tr-usd">${fmtUsd(t.bal * t.price)}</span>
+      </div>
+    </button>
+  `).join('');
+
+  el.querySelectorAll('.token-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const t = TOKENS.find(x => x.sym === row.dataset.sym);
+      selectToken(t);
+    });
+  });
+}
+
+function openSheet(side){
+  state.sheetSide = side;
+  $('#searchInput').value = '';
+  renderTokenList('');
+  $('#sheet').classList.add('open');
+  setTimeout(() => $('#searchInput').focus(), 220);
+}
+
+function closeSheet(){
+  $('#sheet').classList.remove('open');
+  $('#searchInput').blur();
+}
+
+function selectToken(t){
+  if (!t) return;
+  if (state.sheetSide === 'from'){
+    if (t === state.to) state.to = state.from;
+    state.from = t;
+  } else {
+    if (t === state.from) state.from = state.to;
+    state.to = t;
+  }
+  closeSheet();
+  render.all();
+  Quote.refresh();
+}
+
+/* ================================================================
+   CONNECT MODAL
+================================================================ */
+function renderWallets(){
+  const available = CONNECTORS.filter(c => c.available());
+  const unavailable = CONNECTORS.filter(c => !c.available());
+
+  const el = $('#walletList');
+
+  if (!available.length){
+    el.innerHTML = `
+      <div class="empty-state" style="padding:20px 0 8px">
+        No wallet detected.<br/>
+        <a href="https://metamask.io/download/" target="_blank" rel="noopener noreferrer"
+           style="color:#a99bff;text-decoration:none;font-weight:600">Install MetaMask ↗</a>
+      </div>`;
+    return;
+  }
+
+  el.innerHTML = [
+    ...available.map(w => walletRow(w, false)),
+    ...unavailable.map(w => walletRow(w, true)),
+  ].join('');
+
+  el.querySelectorAll('.wallet-item:not(:disabled)').forEach(btn => {
+    btn.addEventListener('click', () => handleConnect(btn));
+  });
+}
+
+function walletRow(w, disabled){
+  const tagClass = w.id === 'demo' ? 'w-tag gas' : 'w-tag';
+  return `
+    <button class="wallet-item ${disabled ? 'dim' : ''}" data-id="${w.id}" ${disabled ? 'disabled' : ''}>
+      <span class="w-icon" style="background:linear-gradient(140deg,${w.c1},${w.c2})">${w.icon}</span>
+      <span class="w-name">${w.name}<small>${w.desc}</small></span>
+      ${w.tag ? `<span class="${tagClass}">${w.tag}</span>` : ''}
+    </button>`;
+}
+
+async function handleConnect(btn){
+  const id = btn.dataset.id;
+  const items = $$('#walletList .wallet-item');
+  items.forEach(i => { i.disabled = true; if (i !== btn) i.classList.add('dim'); });
+
+  const tagSlot = btn.querySelector('.w-tag');
+  const originalTag = tagSlot ? tagSlot.textContent : null;
+  if (tagSlot){
+    tagSlot.innerHTML = `<span class="spinner" style="width:12px;height:12px;border-width:1.6px"></span>`;
+  } else {
+    const s = document.createElement('span');
+    s.className = 'w-tag';
+    s.innerHTML = `<span class="spinner" style="width:12px;height:12px;border-width:1.6px"></span>`;
+    btn.appendChild(s);
+  }
+
+  try {
+    await Wallet.connect(id);
+    closeModal();
+    renderWallets(); // reset
+    toast('success', 'Wallet connected');
+  } catch (err){
+    // restore
+    items.forEach(i => { i.disabled = false; i.classList.remove('dim'); });
+    const tag = btn.querySelector('.w-tag');
+    if (tag){
+      if (originalTag) tag.textContent = originalTag;
+      else tag.remove();
+    }
+    toast('error', err.message || 'Connection failed');
+  }
+}
+
+function openModal(){
+  $('#overlay').classList.add('open');
+  setTimeout(() => $('#modalClose').focus(), 200);
+}
+function closeModal(){ $('#overlay').classList.remove('open'); }
+
+/* ================================================================
+   EVENTS
+================================================================ */
+function bind(){
+  /* ---- amount ---- */
+  $('#fromInput').addEventListener('input', e => {
+    let v = e.target.value.replace(/[^0-9.]/g, '');
+    const parts = v.split('.');
+    if (parts.length > 2) v = parts[0] + '.' + parts.slice(1).join('');
+    if (parts[0].length > 12) v = parts[0].slice(0,12) + (parts[1] ? '.' + parts[1] : '');
+    e.target.value = v;
+    state.amount = v;
+    render.swapBtn();
+    Quote.refresh();
+  });
+
+  /* ---- max ---- */
+  $('#maxBtn').addEventListener('click', () => {
+    if (!state.wallet.connected){ openModal(); return; }
+    // reserve a tiny bit if the user is paying native gas token
+    state.amount = String(state.from.bal);
+    $('#fromInput').value = state.amount;
+    render.swapBtn();
+    Quote.fetch();
+  });
+
+  /* ---- flip ---- */
+  $('#flipBtn').addEventListener('click', () => {
+    $('#flipBtn').classList.toggle('spin');
+    [state.from, state.to] = [state.to, state.from];
+    state.amount = '';
+    $('#fromInput').value = '';
+    state.quote = null;
+    render.all();
+    Quote.fetch();
+  });
+
+  /* ---- tokens ---- */
+  $('#fromTokenBtn').addEventListener('click', () => openSheet('from'));
+  $('#toTokenBtn').addEventListener('click', () => openSheet('to'));
+  $('#sheetBack').addEventListener('click', closeSheet);
+  $('#searchInput').addEventListener('input', e => renderTokenList(e.target.value));
+
+  /* ---- swap ---- */
+  $('#swapBtn').addEventListener('click', () => {
+    if (!state.wallet.connected){ openModal(); return; }
+    Swap.execute();
+  });
+
+  /* ---- settings / slippage ---- */
+  $('#settingsBtn').addEventListener('click', e => {
+    e.stopPropagation();
+    const open = $('#slippagePop').classList.toggle('open');
+    $('#settingsBtn').setAttribute('aria-expanded', open);
+  });
+  $('#slipChips').addEventListener('click', e => {
+    const chip = e.target.closest('.chip');
+    if (!chip) return;
+    $$('#slipChips .chip').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+    state.slippage = clamp(parseFloat(chip.dataset.slip), CONFIG.slippage.min, CONFIG.slippage.max);
+    if (state.quote) Quote.fetch();
+  });
+
+  /* ---- chain selector ---- */
+  $('#netPill').addEventListener('click', e => {
+    e.stopPropagation();
+    renderChainMenu();
+    const open = $('#chainMenu').classList.toggle('open');
+    $('#netPill').setAttribute('aria-expanded', open);
+  });
+
+  /* ---- wallet menu ---- */
+  $('#walletBtn').addEventListener('click', e => {
+    e.stopPropagation();
+    if (!state.wallet.connected){ openModal(); return; }
+    $('#walletMenu').classList.toggle('open');
+  });
+
+  $('#copyAddr').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(state.wallet.address); } catch(_) {}
+    $('#walletMenu').classList.remove('open');
+    toast('success','Address copied');
+  });
+
+  $('#disconnect').addEventListener('click', () => {
+    $('#walletMenu').classList.remove('open');
+    Wallet.disconnect();
+    toast('info','Wallet disconnected');
+  });
+
+  /* ---- modals ---- */
+  $('#modalClose').addEventListener('click', closeModal);
+  $('#overlay').addEventListener('click', e => { if (e.target === $('#overlay')) closeModal(); });
+
+  $('#gaslessInfoBtn').addEventListener('click', () => {
+    $('#infoOverlay').classList.add('open');
+    setTimeout(() => $('#infoClose').focus(), 200);
+  });
+  $('#infoClose').addEventListener('click', () => $('#infoOverlay').classList.remove('open'));
+  $('#infoOverlay').addEventListener('click', e => {
+    if (e.target === $('#infoOverlay')) $('#infoOverlay').classList.remove('open');
+  });
+
+  /* ---- banner ---- */
+  $('#gasBannerClose').addEventListener('click', () => {
+    const b = $('#gasBanner');
+    b.style.transition = 'opacity .25s, transform .25s, height .25s, margin .25s, padding .25s';
+    b.style.opacity = '0';
+    b.style.transform = 'translateY(-8px)';
+    b.style.height = b.offsetHeight + 'px';
+    requestAnimationFrame(() => {
+      b.style.height = '0';
+      b.style.paddingTop = '0';
+      b.style.paddingBottom = '0';
+      b.style.marginBottom = '-12px';
+      b.style.overflow = 'hidden';
+    });
+    setTimeout(() => b.remove(), 320);
+    try { sessionStorage.setItem('nova.gasBanner.dismissed','1'); } catch(_){}
+  });
+
+  /* ---- outside click ---- */
+  document.addEventListener('click', e => {
+    if (!e.target.closest('#slippagePop') && !e.target.closest('#settingsBtn')){
+      $('#slippagePop').classList.remove('open');
+      $('#settingsBtn').setAttribute('aria-expanded','false');
+    }
+    if (!e.target.closest('#walletMenu') && !e.target.closest('#walletBtn')){
+      $('#walletMenu').classList.remove('open');
+    }
+    if (!e.target.closest('#chainMenu') && !e.target.closest('#netPill')){
+      $('#chainMenu').classList.remove('open');
+      $('#netPill').setAttribute('aria-expanded','false');
+    }
+  });
+
+  /* ---- escape ---- */
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape'){
+      closeModal();
+      closeSheet();
+      $('#infoOverlay').classList.remove('open');
+      $('#slippagePop').classList.remove('open');
+      $('#walletMenu').classList.remove('open');
+      $('#chainMenu').classList.remove('open');
+    }
+  });
+}
+
+function renderChainMenu(){
+  const el = $('#chainMenu');
+  el.innerHTML = Object.entries(CHAINS).map(([id, c]) => {
+    const active = parseInt(id) === state.wallet.chainId;
+    return `
+      <button class="chain-item ${active ? 'active' : ''}" data-chain="${id}">
+        <span class="chain-swatch" style="background:${c.color}">${c.short[0]}</span>
+        <span>${c.name}</span>
+        ${active ? `<span style="margin-left:auto;color:#b9a8ff">✓</span>` : ''}
+      </button>`;
+  }).join('');
+
+  el.querySelectorAll('.chain-item').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = parseInt(btn.dataset.chain);
+      $('#chainMenu').classList.remove('open');
+      if (id === state.wallet.chainId) return;
+      try {
+        await Wallet.switchChain(id);
+        toast('success', `Switched to ${CHAINS[id].name}`);
+      } catch (err){
+        toast('error', err.message || 'Failed to switch network');
+      }
+    });
+  });
+}
+
+/* ================================================================
+   INIT
+================================================================ */
+function init(){
+  // restore banner dismissal
+  try {
+    if (sessionStorage.getItem('nova.gasBanner.dismissed') === '1'){
+      $('#gasBanner')?.remove();
+    }
+  } catch(_){}
+
+  renderWallets();
+  render.all();
+  bind();
+
+  // If an injected wallet is already authorized, reconnect silently.
+  if (typeof window.ethereum !== 'undefined'){
+    window.ethereum.request({ method: 'eth_accounts' })
+      .then(accounts => {
+        if (accounts && accounts.length){
+          Wallet.connect('injected').catch(() => {});
+        }
+      })
+      .catch(() => {});
+  }
+}
+
+init();
+</script>
+</body>
+</html>
