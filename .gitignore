@@ -1,5 +1,6 @@
 node_modules/
 .env
-package-lock.json
+.env.*
+!.env.example
 output/
 data/
