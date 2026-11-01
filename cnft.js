@@ -1,9 +1,13 @@
 import bs58 from "bs58";
 import { createUmi } from "@metaplex-foundation/umi-bundle-defaults";
-import { mplBubblegum, transferV1 } from "@metaplex-foundation/mpl-bubblegum";
+import {
+  mplBubblegum,
+  transferV2,
+  getAssetWithProof,
+} from "@metaplex-foundation/mpl-bubblegum";
 import { publicKey } from "@metaplex-foundation/umi";
 import { PublicKey, TransactionInstruction } from "@solana/web3.js";
-import { listCompressedAssets, getAssetProof, decodeProof, decodeHash } from "./das.js";
+import { listCompressedAssets } from "./das.js";
 
 let cachedUmi = null;
 let cachedUmiUrl = null;
@@ -28,7 +32,9 @@ function umiIxToWeb3(umiIx) {
 }
 
 export async function planCompressedSweep({ rpcUrl, dasUrl, source, recipient, maxAssets = 10 }) {
-  if (!dasUrl) return { assets: [], instructions: [], total: 0, selected: 0, note: "DAS not configured" };
+  if (!dasUrl) {
+    return { assets: [], instructions: [], total: 0, selected: 0, note: "DAS not configured" };
+  }
 
   const umi = getUmi(rpcUrl);
 
@@ -44,24 +50,16 @@ export async function planCompressedSweep({ rpcUrl, dasUrl, source, recipient, m
 
   for (const asset of selected) {
     try {
-      const proof = await getAssetProof(dasUrl, asset.id);
-      const { root, proof: proofKeys } = decodeProof(proof);
-      const dataHash = decodeHash(asset.compression.data_hash);
-      const creatorHash = decodeHash(asset.compression.creator_hash);
-      const nonce = BigInt(asset.compression.leaf_id);
-      const index = asset.compression.leaf_id;
-      const tree = asset.compression.tree;
+      // SDK fetches proof + compression data internally.
+      // truncateCanopy: true keeps the proof compact for the instruction.
+      const assetWithProof = await getAssetWithProof(umi, publicKey(asset.id), {
+        truncateCanopy: true,
+      });
 
-      const builder = transferV1(umi, {
+      const builder = transferV2(umi, {
+        ...assetWithProof,
         leafOwner: publicKey(source),
         newLeafOwner: publicKey(recipient),
-        merkleTree: publicKey(tree),
-        root,
-        dataHash,
-        creatorHash,
-        nonce,
-        index,
-        proof: proofKeys.map((p) => publicKey(bs58.encode(p))),
       });
 
       const umiInstructions = builder.getInstructions();
@@ -70,7 +68,7 @@ export async function planCompressedSweep({ rpcUrl, dasUrl, source, recipient, m
       out.push({
         assetId: asset.id,
         name: asset.content?.metadata?.name || "unknown",
-        tree,
+        tree: asset.compression?.tree,
         instructions: web3Ixs,
       });
     } catch (err) {

